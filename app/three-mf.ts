@@ -4,7 +4,7 @@ import type { ModelMesh } from "./orientation-viewer";
 import type { Placement } from "./nest-engine";
 
 type ExportPart = { id: string; name: string; meshes: ModelMesh[]; orientation: QuaternionTuple };
-export type ExportPlate = { id: string; name: string };
+export type ExportPlate = { id: string; name: string; locked?: boolean };
 
 function xml(value: string) {
   return value.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
@@ -143,13 +143,36 @@ export function create3mf(parts: ExportPart[], placements: Placement[]) {
   return new Blob([zipSync(filesFor3mf(parts, placements), { level: 6 })], { type: "model/3mf" });
 }
 
-export function createPlateArchive(parts: ExportPart[], placements: Placement[], plates: ExportPlate[]) {
-  const files: Record<string, Uint8Array> = {};
-  for (const [index, plate] of plates.entries()) {
-    const platePlacements = placements.filter((placement) => (placement.plateId ?? plates[0]?.id) === plate.id);
-    if (!platePlacements.length) continue;
-    files[`plate-${String(index + 1).padStart(2, "0")}.3mf`] = zipSync(filesFor3mf(parts, platePlacements), { level: 6 });
-  }
-  if (!Object.keys(files).length) throw new Error("No placed models are available to export.");
-  return new Blob([zipSync(files, { level: 6 })], { type: "application/zip" });
+export function createMultiPlate3mf(parts: ExportPart[], placements: Placement[], plates: ExportPlate[]) {
+  const includedPlates = plates.filter((plate) => placements.some((placement) => (placement.plateId ?? plates[0]?.id) === plate.id));
+  const includedPlacements = placements.filter((placement) => includedPlates.some((plate) => plate.id === (placement.plateId ?? includedPlates[0]?.id)));
+  if (!includedPlates.length || !includedPlacements.length) throw new Error("No placed models are available to export.");
+
+  const files = filesFor3mf(parts, includedPlacements);
+  const plateMembership = new Map<string, number>();
+  includedPlacements.forEach((placement, index) => plateMembership.set(placement.id, index + 1));
+  const plateXml = includedPlates.map((plate, index) => {
+    const instances = includedPlacements
+      .filter((placement) => (placement.plateId ?? includedPlates[0]?.id) === plate.id)
+      .map((placement) => {
+        const objectId = plateMembership.get(placement.id);
+        return `<model_instance><metadata key="object_id" value="${objectId}"/><metadata key="instance_id" value="0"/><metadata key="identify_id" value="${objectId}"/></model_instance>`;
+      }).join("");
+    return `<plate><metadata key="plater_id" value="${index + 1}"/><metadata key="plater_name" value="${xml(plate.name)}"/><metadata key="locked" value="${Boolean(plate.locked)}"/>${instances}</plate>`;
+  }).join("");
+  const objectXml = includedPlacements.map((placement, index) => {
+    const part = parts.find((candidate) => candidate.id === placement.partId);
+    return `<object id="${index + 1}"><metadata key="name" value="${xml(`${part?.name ?? "Part"} #${placement.copy}`)}"/></object>`;
+  }).join("");
+  const modelSettings = `<?xml version="1.0" encoding="UTF-8"?><config>${objectXml}${plateXml}</config>`;
+  const model = strFromU8(files["3D/3dmodel.model"]).replace(
+    '<metadata name="Application">PrintNest</metadata>',
+    '<metadata name="Application">BambuStudio-01.10.01.50</metadata><metadata name="BambuStudio:3mfVersion">1</metadata>',
+  );
+  files["3D/3dmodel.model"] = strToU8(model);
+  files["Metadata/model_settings.config"] = strToU8(modelSettings);
+  files["Metadata/project_settings.config"] = strToU8(JSON.stringify({ from: "PrintNest", version: "1", filament_settings_id: ["Generic PLA"], printer_settings_id: "" }));
+  validatePackage(files, includedPlacements.length);
+  if ((modelSettings.match(/<plate>/g) ?? []).length !== includedPlates.length || (modelSettings.match(/<model_instance>/g) ?? []).length !== includedPlacements.length) throw new Error("3MF validation failed: plate membership metadata is incomplete.");
+  return new Blob([zipSync(files, { level: 6 })], { type: "model/3mf" });
 }

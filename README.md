@@ -23,7 +23,7 @@ All geometry processing, nesting, previews, project saving, and exports run in t
 2. **Orient for print** — choose a print face manually or use the orientation helper. The resulting footprint and height are recalculated.
 3. **Define the plate** — select a printer or enter custom X, Y, and Z limits. PrintNest enforces an edge safety margin and chosen part clearance.
 4. **Nest** — the search evaluates eligible positions and XY rotations in the browser. The selected effort and objective trade run time against packing quality.
-5. **Review and export** — inspect collisions and unassigned copies, make manual changes, then export a Core 3MF handoff for the slicer. Multi-plate jobs download as a ZIP containing one standard 3MF per plate, avoiding slicer-specific project metadata.
+5. **Review and export** — inspect collisions and unassigned copies, make manual changes, then export a Core 3MF handoff for a single plate. Multi-plate jobs download as one Bambu Studio / OrcaSlicer project 3MF, preserving every plate and its placements in one file.
 
 The nesting engine uses original geometry footprints for its final collision checks. It does not send model geometry or project data to a service.
 
