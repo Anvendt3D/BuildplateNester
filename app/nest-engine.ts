@@ -162,7 +162,6 @@ function orderInstances(parts: NestPart[], attempt: number): Instance[] {
 }
 
 function layoutMetrics(result: NestResult, request: NestRequest) {
-  const byPart = new Map(request.parts.map((part) => [part.id, part]));
   const worldBounds = result.placed.map((placement) => footprintBounds(translateFootprint(placement.footprint, placement.x, placement.y)));
   const occupiedArea = worldBounds.length ? (Math.max(...worldBounds.map((b) => b.maxX)) - Math.min(...worldBounds.map((b) => b.minX))) * (Math.max(...worldBounds.map((b) => b.maxY)) - Math.min(...worldBounds.map((b) => b.minY))) : 0;
   const centers = worldBounds.map((b) => ({ x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2 }));
@@ -188,7 +187,7 @@ function layoutMetrics(result: NestResult, request: NestRequest) {
 }
 
 async function nestAttempt(request: NestRequest, attempt: number, noFit: NoFitMap, control: Control, totalChecks: { value: number }): Promise<NestResult> {
-  const { parts, width, depth, clearance, autoRotate, rotationStep, nestingStart, outlinePrecision } = request;
+  const { parts, width, depth, clearance, autoRotate, nestingStart, outlinePrecision } = request;
   const edgeMargin = request.edgeMargin ?? 0;
   const instances = orderInstances(parts, attempt), tolerance = OUTLINE_TOLERANCES[outlinePrecision];
   const rotationSchedule = !autoRotate ? [360] : request.preset === "quick" ? [90] : request.preset === "best" ? [90, 45, 15, 5] : [90, 45, 15];

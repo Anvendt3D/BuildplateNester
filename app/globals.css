@@ -1,19 +1,20 @@
-@import "tailwindcss";
-
 :root {
-  --ink: #142019;
-  --muted: #66726b;
-  --line: #d8ded9;
-  --panel: #f7f8f6;
-  --paper: #ffffff;
+  --ink: #e6e5ef;
+  --muted: #9493a5;
+  --line: #30303b;
+  --panel: #1a1a20;
+  --paper: #1a1a20;
   --accent: #ff681f;
-  --accent-dark: #d84600;
-  --green: #23a36b;
+  --accent-dark: #ff9a68;
+  --green: #4ade80;
+  --bg: #111114;
+  --surface: #1a1a20;
+  --surface-raised: #23232c;
 }
 
 * { box-sizing: border-box; }
-html, body { margin: 0; min-height: 100%; background: #eef1ee; color: var(--ink); }
-body { font-family: Arial, Helvetica, sans-serif; }
+html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--ink); }
+body { font-family: "Segoe UI", system-ui, sans-serif; }
 button, input { font: inherit; }
 button { color: inherit; }
 
@@ -337,3 +338,64 @@ a.button { display: inline-flex; align-items: center; justify-content: center; c
   .viewer-panel, .orientation-canvas { min-height: 360px; }
   .orientation-controls { overflow: visible; }
 }
+
+/* Static-tool theme: compact, high-contrast panels inspired by browser CAD utilities. */
+.app-shell { background: var(--bg); }
+.topbar { height: 48px; flex-basis: 48px; padding: 0 16px; gap: 12px; background: var(--surface); border-bottom: 1px solid var(--line); }
+.brand { gap: 8px; font-size: 14px; letter-spacing: .02em; }
+.brand-mark { width: 28px; height: 28px; background: var(--accent); clip-path: none; font-size: 10px; letter-spacing: -.04em; border-radius: 6px; }
+.beta { color: var(--muted); border-color: var(--line); font-size: 8px; letter-spacing: .08em; }
+.privacy-note { color: var(--muted); font-size: 11px; }
+.status-dot { background: var(--green); box-shadow: 0 0 0 3px rgba(74, 222, 128, .13); }
+.topbar-actions { gap: 6px; }
+.topbar .button { min-height: 28px; padding: 0 10px; border-radius: 6px; font-size: 11px; }
+.button.secondary, .github-link { border-color: var(--line); background: var(--surface-raised); color: var(--muted); }
+.button.secondary:hover:not(:disabled), .github-link:hover { border-color: var(--accent); color: var(--accent-dark); }
+.workspace { grid-template-columns: 310px minmax(440px, 1fr) 360px; background: var(--bg); }
+.sidebar { padding: 18px 16px; background: var(--surface); color: var(--ink); }
+.left-sidebar, .controls-sidebar { border-color: var(--line); }
+.panel-heading { margin-bottom: 14px; }
+.panel-heading h1, .panel-heading h2 { font-size: 18px; color: var(--ink); }
+.eyebrow { color: var(--muted); font-size: 9px; letter-spacing: .13em; }
+.count-badge { background: var(--surface-raised); color: var(--muted); border: 1px solid var(--line); }
+.drop-zone { min-height: 124px; border-color: #494959; background: #15151a; color: var(--ink); border-radius: 8px; }
+.drop-zone:hover, .drop-zone.is-loading { border-color: var(--accent); background: rgba(255, 104, 31, .08); }
+.drop-zone span, .field-note, .tip p { color: var(--muted); }
+.upload-icon { border-color: #555564; background: var(--surface-raised); color: var(--accent-dark); border-radius: 5px; }
+.text-button { color: var(--accent-dark); }
+.part-card { background: var(--surface-raised); border-color: var(--line); border-radius: 7px; padding: 10px 8px 9px 0; }
+.part-card.selected { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.part-card.has-unplaced { border-color: #8d733b; box-shadow: inset 3px 0 #f0ba4d; }
+.part-copy { color: var(--ink); }.part-copy span, .part-placement-summary { color: var(--muted); }
+.quantity-stepper, .quantity-stepper input { border-color: #454553; background: #15151a; color: var(--ink); }
+.quantity-stepper button, .part-actions button, .part-drag-handle { background: #282832; border-color: #454553; color: var(--muted); }
+.part-actions button:hover, .part-actions .fill-action { color: var(--accent-dark); border-color: var(--accent); }
+.part-advanced { border-color: #383844; }.part-advanced summary { color: var(--muted); }.part-advanced[open] summary { color: var(--ink); }
+.part-rules select, .part-rules input, .printer-select, .two-inputs > span, .three-inputs span, .range-row output, .placement-tools select, .placement-tools button, .plate-admin input, .plate-admin button { background: #15151a; border-color: #454553; color: var(--ink); }
+.plate-stage { background: #131318; padding: 12px 18px 12px; }
+.plate-tabs > button { min-width: 168px; height: 58px; background: var(--surface); border-color: var(--line); color: var(--ink); }
+.plate-tabs > button.active { border-color: var(--accent); box-shadow: inset 0 -3px var(--accent); background: #23232c; }
+.plate-tabs svg, .plate-tabs svg rect { background: #15151a; fill: #1e1e26; border-color: #3b3b47; }.plate-tabs svg path { fill: #ff9a68; }
+.plate-tabs small, .plate-tabs em, .stage-toolbar, .legend, .status-strip { color: var(--muted); }
+.plate-tabs > button.add-plate-tab { color: var(--accent-dark); }
+.plate-admin input, .plate-admin button { border-radius: 5px; }
+.build-plate { background: #181820 !important; border-color: #4b4b59 !important; box-shadow: inset 0 0 0 1px rgba(255, 104, 31, .08); }
+.build-plate .grid-line { stroke: #292934 !important; }.build-plate .bed-boundary { stroke: #77758c !important; }
+.stage-toolbar strong { color: var(--ink); }.dimension { color: var(--muted); }.dimension.top, .dimension.side { border-color: #555565; }.dimension.top span, .dimension.side span { background: #131318; }
+.status-strip { border-color: var(--line); }.status-strip span:last-child { color: var(--green); }
+.control-group { border-color: var(--line); }.control-group > label, .switch-row label, .label-with-help > label { color: var(--ink); }
+.help-tip summary { border-color: #555565; background: var(--surface-raised); color: var(--muted); }.help-tip div { background: #292936; border-color: #59596b; }
+.mode-switch { background: #15151a; border-color: #41414e; }.mode-switch button { color: var(--muted); }.mode-switch button.active { background: #30303b; color: var(--ink); }
+.search-presets button, .presets button, .orient-button, .orientation-presets button, .orientation-reset, .plate-action-grid button { background: var(--surface-raised); border-color: #454553; color: var(--ink); }
+.search-presets button.active { border-color: var(--accent); background: rgba(255,104,31,.14); color: var(--accent-dark); box-shadow: inset 0 -2px var(--accent); }
+.switch { background: #545461; }.switch.on, .button.primary { background: var(--accent); }.button.primary:hover:not(:disabled) { background: var(--accent-dark); color: #16151d; }
+.multi-plate-controls, .primary-nest, .result-summary, .layout-options, .slicer-handoff, .metrics, .tip { background: #202028; border-color: var(--line); }
+.primary-nest > select, .slicer-handoff > select { background: #15151a; border-color: #454553; color: var(--ink); }
+.result-summary { background: rgba(74,222,128,.07); border-color: rgba(74,222,128,.35); }.result-summary.has-unassigned, .unplaced-help { background: rgba(240,186,77,.08); border-color: rgba(240,186,77,.38); }
+.layout-options button { background: #1d1d25; border-color: #363642; color: var(--ink); }.layout-options button:hover { background: rgba(255,104,31,.13); }
+.slicer-handoff .slicer-download { background: var(--accent); border-color: var(--accent); color: #17151f; }
+.metrics strong { color: var(--ink); }.tip { border-left-color: var(--accent); }
+.modal-backdrop, .working-overlay { background: rgba(4,4,8,.8); }.orientation-modal, .working-card { background: var(--surface); color: var(--ink); }.orientation-modal > header, .orientation-modal > footer { border-color: var(--line); }.viewer-panel { background: #121218; border-color: var(--line); }.viewer-hint { background: rgba(20,20,28,.94); }.orientation-controls { background: var(--surface); }.orientation-controls > p, .oriented-size dt, .orientation-modal > footer span { color: var(--muted); }.oriented-size div { border-color: var(--line); }.cancel-orientation { background: var(--surface-raised); border-color: #555565; color: var(--ink); }
+.working-card { border-top-color: var(--accent); }.working-progress { background: #353542; }.working-stop { background: #25252e; border-color: #d45b6f; color: #ff8a9c; }
+@media (max-width: 1050px) { .workspace { grid-template-columns: 260px minmax(400px, 1fr); }.controls-sidebar { background: var(--surface); border-color: var(--line); } }
+@media (max-width: 760px) { .topbar { height: 48px; flex-basis: 48px; }.topbar .github-link { display: none; }.workspace { background: var(--bg); }.sidebar { background: var(--surface); }.plate-stage { background: #131318; } }

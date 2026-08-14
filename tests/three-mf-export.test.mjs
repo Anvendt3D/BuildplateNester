@@ -1,15 +1,16 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { strFromU8, unzipSync } from "fflate";
+import { buildSync } from "esbuild";
 
 const temporary = mkdtempSync(join(tmpdir(), "printnest-3mf-test-"));
 const bundle = join(temporary, "three-mf.mjs");
-execFileSync(new URL("../node_modules/.bin/esbuild", import.meta.url).pathname, [new URL("../app/three-mf.ts", import.meta.url).pathname, "--bundle", "--platform=node", "--format=esm", `--outfile=${bundle}`]);
+const source = fileURLToPath(new URL("../app/three-mf.ts", import.meta.url));
+buildSync({ entryPoints: [source], bundle: true, platform: "node", format: "esm", outfile: bundle });
 const { create3mf } = await import(pathToFileURL(bundle).href);
 
 test.after(() => rmSync(temporary, { recursive: true, force: true }));

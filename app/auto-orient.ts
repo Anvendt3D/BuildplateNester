@@ -91,7 +91,7 @@ function scoreDirection(faces: Face[], bedFaceNormal: Vec3) {
 }
 
 export function findAutoOrientation(meshes: ModelMesh[]): AutoOrientResult {
-  const { faces, groups, totalTriangles } = sampledFaces(meshes);
+  const { faces, groups } = sampledFaces(meshes);
   if (!faces.length) return { orientation: [0, 0, 0, 1], candidates: 0, sampledTriangles: 0, contactArea: 0, overhangCost: 0 };
   const directions = uniqueDirections(groups);
   let bestNormal = directions[0], best = scoreDirection(faces, bestNormal);

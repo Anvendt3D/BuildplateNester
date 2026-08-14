@@ -1,108 +1,84 @@
-# vinext-starter
+# PrintNest
 
-A clean full-stack starter running on
-[vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and
-Drizzle support.
+**PrintNest** is a private, browser-based build-plate planner for additive manufacturing. Import STEP or STL files, set quantities and print-bed constraints, find efficient layouts across one or more plates, then export a slicer-ready 3MF project.
 
-## Prerequisites
+All geometry processing, nesting, previews, project saving, and exports run in the browser. Models are never uploaded and no account or server is required.
 
-- Node.js `>=22.13.0`
-- Linux with `flock`, `curl`, and GNU `timeout`
+## What it does
 
-## Sites Lifecycle
+- Imports `.step`, `.stp`, and `.stl` part files directly in the browser
+- Converts STEP geometry locally using the bundled OpenCascade WebAssembly engine
+- Calculates oriented 2D footprints from imported meshes
+- Plans layouts for common printer beds or custom bed dimensions
+- Supports quantities, priorities, minimum quantities, edge clearance, locked placements, and manual placement edits
+- Searches multiple rotations and candidate arrangements to improve plate utilisation
+- Plans across multiple plates, including overflow, consolidation, and production-set workflows
+- Previews and adjusts 3D part orientation before nesting
+- Saves the active project in browser IndexedDB on the current device
+- Exports placement data as JSON and placements as 3MF projects for OrcaSlicer, Bambu Studio, or PrusaSlicer
 
-The Sites lifecycle CLI runs the locked dependency install before returning this checkout. Edit the source under `app/`, then checkpoint when a coherent milestone is ready to inspect or share. The remote Sites builder runs `npm run build` against the pushed commit. Do not repeat install or build as a normal pre-checkpoint step.
+## Method
 
-This starter does not use `wrangler.jsonc`.
+1. **Import and inspect** — each part is parsed locally and represented by a 3D mesh plus a 2D footprint.
+2. **Orient for print** — choose a print face manually or use the orientation helper. The resulting footprint and height are recalculated.
+3. **Define the plate** — select a printer or enter custom X, Y, and Z limits. PrintNest enforces an edge safety margin and chosen part clearance.
+4. **Nest** — the search evaluates eligible positions and XY rotations in the browser. The selected effort and objective trade run time against packing quality.
+5. **Review and export** — inspect collisions and unassigned copies, make manual changes, then export a verified 3MF handoff for the slicer.
 
-`install:ci` is intentionally a single, non-retrying `npm ci`. It refuses a concurrent install for the same project, consumes a matching image-seeded npm cache with `--prefer-offline` while retaining registry fallback for a missing cache object, otherwise downloads and verifies the complete vinext tarball recorded in `package-lock.json`, limits npm to one socket, and terminates a stalled install. `build` applies a short timeout and then validates the Sites artifact. These helpers target Linux and use GNU `timeout`; they are not native macOS scripts.
+The nesting engine uses original geometry footprints for its final collision checks. It does not send model geometry or project data to a service.
 
-Scripts that need writable project-scoped home, npm, XDG, and temporary paths use `scripts/sites-env.sh`. The `dev` and `start` scripts honor the caller's runtime environment and keep Wrangler logs inside the checkout. The generated `.sites-runtime/` directory is disposable and ignored by Git.
+## Run locally
 
-## Included Shape
+Requirements: Node.js 22.18 or later.
 
-- edit site code under `app/`
-- `app/chatgpt-auth.ts` provides optional dispatch-owned ChatGPT sign-in helpers
-- `.openai/hosting.json` declares optional Sites D1 and R2 bindings
-- `vite.config.ts` simulates declared bindings for local development
-- `db/index.ts` reads the D1 binding from the Cloudflare Worker environment
-- `db/schema.ts` starts intentionally empty
-- `examples/d1/` contains an optional D1 example surface
-- `drizzle.config.ts` supports local migration generation when needed
-
-## Workspace Auth Headers
-
-OpenAI workspace sites can read the current user's email from
-`oai-authenticated-user-email`.
-
-SIWC-authenticated workspace sites may also receive
-`oai-authenticated-user-full-name` when the user's SIWC profile has a non-empty
-`name` claim. The full-name value is percent-encoded UTF-8 and is accompanied by
-`oai-authenticated-user-full-name-encoding: percent-encoded-utf-8`.
-
-Treat the full name as optional and fall back to email when it is absent:
-
-```tsx
-import { headers } from "next/headers";
-
-export default async function Home() {
-  const requestHeaders = await headers();
-  const email = requestHeaders.get("oai-authenticated-user-email");
-  const encodedFullName = requestHeaders.get("oai-authenticated-user-full-name");
-  const fullName =
-    encodedFullName &&
-    requestHeaders.get("oai-authenticated-user-full-name-encoding") ===
-      "percent-encoded-utf-8"
-      ? decodeURIComponent(encodedFullName)
-      : null;
-
-  const displayName = fullName ?? email;
-  // ...
-}
+```bash
+npm ci
+npm run dev
 ```
 
-## Optional Dispatch-Owned ChatGPT Sign-In
+Open the local address Vite prints in the terminal. For a production-style local build:
 
-Import the ready-to-use helpers from `app/chatgpt-auth.ts` when the site needs
-optional or required ChatGPT sign-in:
+```bash
+npm run build
+npm run preview
+```
 
-- Use `getChatGPTUser()` for optional signed-in UI.
-- Use `requireChatGPTUser(returnTo)` for server-rendered pages that should send
-  anonymous visitors through Sign in with ChatGPT.
-- Use `chatGPTSignInPath(returnTo)` and `chatGPTSignOutPath(returnTo)` for
-  browser links or actions.
-- Pass a same-origin relative `returnTo` path for the destination after sign-in
-  or sign-out. The helper validates and safely encodes it.
-- Mark protected pages with `export const dynamic = "force-dynamic"` because
-  they depend on per-request identity headers.
+## GitHub Pages deployment
 
-Dispatch owns `/signin-with-chatgpt`, `/signout-with-chatgpt`, `/callback`, the
-OAuth cookies, and identity header injection. Do not implement app routes for
-those reserved paths. Routes that do not import and call the helper remain
-anonymous-compatible.
+The repository includes [`.github/workflows/deploy-pages.yml`](.github/workflows/deploy-pages.yml), which builds a static browser-only site and deploys it whenever `main` changes.
 
-SIWC establishes identity only; it does not prove workspace membership. Use the
-Sites hosting platform's access policy controls for workspace-wide restrictions,
-or enforce explicit server-side membership or allowlist checks.
+1. In GitHub, open **Settings → Pages** for the repository.
+2. Set the publishing source to **GitHub Actions**.
+3. Push to `main` or run **Deploy Nester to GitHub Pages** from the **Actions** tab.
 
-Use SIWC for account pages, user-specific dashboards, saved records, and write
-actions tied to the current ChatGPT user. Leave public content anonymous.
+For this repository the site is published at:
 
-## Diagnostic Commands
+`https://anvendt3d.github.io/BuildplateNester/`
 
-- `npm run install:ci`: perform the one bounded lockfile install
-- `npm run dev`: start the Vite/Vinext development server
-- `npm run build`: build and validate the deployable Sites artifact
-- `npm run start`: start the built Vinext application
-- `npm test`: build, validate, and verify the rendered development-preview metadata
-- `npm run validate:artifact`: recheck an existing artifact's manifest and ESM `default.fetch` export
-- `npm run db:generate`: generate Drizzle migrations after schema changes
+To build the same Pages artifact locally on macOS or Linux:
 
-Use build and validation commands for targeted diagnosis after a remote failure, not as part of the normal checkpoint path.
+```bash
+npm run build:pages
+```
 
-The timeout defaults can be overridden for a controlled canary with `SITES_INSTALL_TIMEOUT`, `SITES_INSTALL_KILL_AFTER`, `SITES_BUILD_TIMEOUT`, and `SITES_BUILD_KILL_AFTER`. A timeout fails the command; the helpers never retry an unchanged install or build.
+The build writes the publishable files to `dist/client`. It uses relative static-asset URLs, so the same artifact works from this repository's Pages URL or a custom domain.
 
-## Learn More
+## Project layout
 
-- [vinext Documentation](https://github.com/cloudflare/vinext)
-- [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)
+```text
+app/
+  page.tsx              Application UI and browser workflow
+  nest-engine.ts        Packing search and placement evaluation
+  footprint.ts          Polygon footprints and collision checks
+  stl.ts                STL parsing
+  three-mf.ts           3MF and slicer-project export
+  *.worker.ts           Background nesting and orientation work
+app/step-import.worker.ts Background `meshStep` STEP conversion worker
+.github/workflows/      GitHub Pages deployment
+```
+
+## Privacy and limitations
+
+PrintNest is designed for local, in-browser planning. Browser storage is device-specific and can be cleared by browser settings. Complex STEP files and very dense layouts may take significant memory or time; reduce orientation/search effort when working with large assemblies.
+
+This project uses [meshStep](https://github.com/CNCKitchen/meshStep) for local STEP-to-mesh conversion. It has no sign-in flow, server-side API, database, or telemetry.

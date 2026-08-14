@@ -21,20 +21,6 @@ type Printer = { id: string; brand: string; name: string; width: number; depth: 
 type RotationEffort = "fast" | "balanced" | "detailed" | "maximum";
 type SlicerTarget = "prusa" | "orca" | "bambu";
 
-const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
-const withBasePath = (path: string) => `${BASE_PATH}${path}`;
-
-declare global {
-  interface Window {
-    occtimportjs?: () => Promise<{
-      ReadStepFile: (data: Uint8Array, params: Record<string, unknown>) => {
-        success: boolean;
-        meshes: Array<{ color?: number[]; attributes: { position: { array: number[] } }; index?: { array: number[] } }>;
-      };
-    }>;
-  }
-}
-
 const COLORS = ["#ff7a1a", "#2f80ed", "#25a66a", "#9b51e0", "#d94c61", "#00a6a6"];
 const IDENTITY: QuaternionTuple = [0, 0, 0, 1];
 const GRID = 10;
@@ -146,12 +132,16 @@ function markAllCollisions(placements: ProjectPlacement[], plates: Plate[], widt
   return plates.flatMap((plate) => markCollisions(placements.filter((placement) => placement.plateId === plate.id), width, depth, clearance).map((placement) => ({ ...placement, plateId: plate.id } as ProjectPlacement)));
 }
 
-function loadOcctScript() {
-  if (window.occtimportjs) return Promise.resolve();
-  return new Promise<void>((resolve, reject) => {
-    const existing = document.querySelector<HTMLScriptElement>('script[data-occt="true"]');
-    if (existing) { existing.addEventListener("load", () => resolve(), { once: true }); existing.addEventListener("error", () => reject(new Error("Could not load the STEP engine.")), { once: true }); return; }
-    const script = document.createElement("script"); script.src = withBasePath("/occt/occt-import-js.js"); script.dataset.occt = "true"; script.onload = () => resolve(); script.onerror = () => reject(new Error("Could not load the STEP engine.")); document.head.appendChild(script);
+function importStepFile(text: string): Promise<ModelMesh> {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(new URL("./step-import.worker.ts", import.meta.url), { type: "module" });
+    worker.onmessage = ({ data }) => {
+      worker.terminate();
+      if (!data.ok) { reject(new Error(data.message)); return; }
+      resolve({ positions: Array.from(data.positions), indices: Array.from(data.indices) });
+    };
+    worker.onerror = () => { worker.terminate(); reject(new Error("The STEP importer could not start.")); };
+    worker.postMessage({ text });
   });
 }
 
@@ -198,7 +188,7 @@ export default function Home() {
   const selectedPlacement = placements.find((placement) => placement.id === selectedPlacementId) ?? null;
   const unplacedByPart = useMemo(() => parts.map((part) => ({ part, count: Math.max(0, part.quantity - allPlacements.filter((placement) => placement.partId === part.id).length) })).filter((item) => item.count > 0), [parts, allPlacements]);
   const unplacedCount = unplacedByPart.reduce((sum, item) => sum + item.count, 0);
-  const setUnplacedCount = (_value: number) => undefined;
+  const setUnplacedCount = (_value: number) => { void _value; };
   const totalCollisionCount = allPlacements.filter((placement) => placement.colliding).length;
   const requestedCount = parts.reduce((sum, part) => sum + part.quantity, 0), usedPlateCount = plates.filter((plate) => allPlacements.some((placement) => placement.plateId === plate.id)).length;
   const averageUtilization = usedPlateCount ? allPlacements.reduce((sum, placement) => sum + footprintArea(placement.footprint), 0) / Math.max(1, usedPlateCount * bedWidth * bedDepth) * 100 : 0;
@@ -225,8 +215,8 @@ export default function Home() {
 
   useEffect(() => {
     if (!storageReady) return;
-    setSaveStatus("saving");
     const timer = window.setTimeout(() => {
+      setSaveStatus("saving");
       saveLocalProject({ parts, placements: allPlacements, plates, activePlateId, printerId, bedWidth, bedDepth, bedHeight, clearance, autoRotate, rotationEffort, searchPreset, uiMode, nestingStart, outlinePrecision, objective, preferredSlicer, maxPlates, keepSetsTogether } satisfies StoredProject)
         .then(() => setSaveStatus("saved")).catch(() => setSaveStatus("error"));
     }, 450);
@@ -324,19 +314,17 @@ export default function Home() {
   async function importFiles(files: FileList | File[]) {
     const selected = Array.from(files).filter((file) => /\.(stp|step|stl)$/i.test(file.name));
     if (!selected.length) { setMessage("Choose one or more .stp, .step, or .stl files."); return; }
-    setIsImporting(true); setWorkingLabel("Preparing the local geometry engine…"); setMessage("Preparing the local geometry engine…"); await waitForPaint();
+    setIsImporting(true); setWorkingLabel("Preparing the local STEP importer…"); setMessage("Preparing the local STEP importer…"); await waitForPaint();
     try {
-      const hasStep = selected.some((file) => /\.(stp|step)$/i.test(file.name));
-      if (hasStep) await loadOcctScript();
-      const occt = hasStep ? await window.occtimportjs!() : null, imported: Part[] = [];
+      const imported: Part[] = [];
       for (const file of selected) {
         setWorkingLabel(`Reading ${file.name}…`); setMessage(`Reading ${file.name}…`); await waitForPaint();
         const buffer = await file.arrayBuffer(); let meshes: ModelMesh[], source: "STEP" | "STL";
         if (/\.stl$/i.test(file.name)) { meshes = [parseStl(buffer)]; source = "STL"; }
         else {
-          const result = occt!.ReadStepFile(new Uint8Array(buffer), { linearUnit: "millimeter", linearDeflectionType: "bounding_box_ratio", linearDeflection: 0.001, angularDeflection: 0.5 });
-          if (!result.success || !result.meshes.length) throw new Error(`${file.name} could not be triangulated.`);
-          meshes = result.meshes.map((mesh) => ({ positions: [...mesh.attributes.position.array], indices: mesh.index?.array ? [...mesh.index.array] : [], color: mesh.color })); source = "STEP";
+          const mesh = await importStepFile(await file.text());
+          if (!mesh.positions.length || !mesh.indices.length) throw new Error(`${file.name} could not be triangulated.`);
+          meshes = [mesh]; source = "STEP";
         }
         const base: Part = { id: `${file.name}-${file.size}-${file.lastModified}`, name: file.name, quantity: 1, priority: 1, minQuantity: 0, height: 0, footprint: [], color: COLORS[(parts.length + imported.length) % COLORS.length], source, meshes, orientation: IDENTITY };
         imported.push(updateGeometry(base, IDENTITY));
@@ -688,7 +676,7 @@ export default function Home() {
   }
   const brands = [...new Set(PRINTERS.map((p) => p.brand))];
   return <main className="app-shell" aria-busy={isWorking}>
-    <header className="topbar"><div className="brand"><span className="brand-mark">PN</span><span>PrintNest</span><span className="beta">BETA</span></div><div className="privacy-note"><span className={`status-dot ${saveStatus === "error" ? "storage-error" : ""}`} /> {saveStatus === "saving" ? "Saving project locally…" : saveStatus === "error" ? "Local save unavailable" : "Project saved on this device"}</div><div className="topbar-actions"><a className="button secondary source-download" href={withBasePath("/printnest-complete-source.zip")} download>Download source</a><button className="button secondary" onClick={undoLayout} disabled={!history.length || isWorking}>Undo</button><button className="button secondary" onClick={exportPlan} disabled={!allPlacements.length || isWorking}>Export project</button></div></header>
+    <header className="topbar"><div className="brand"><span className="brand-mark">PN</span><span>PrintNest</span><span className="beta">BROWSER APP</span></div><div className="privacy-note"><span className={`status-dot ${saveStatus === "error" ? "storage-error" : ""}`} /> {saveStatus === "saving" ? "Saving project locally…" : saveStatus === "error" ? "Browser storage unavailable" : "Local-only workspace"}</div><div className="topbar-actions"><a className="button secondary github-link" href="https://github.com/Anvendt3D/BuildplateNester" target="_blank" rel="noreferrer">GitHub</a><button className="button secondary" onClick={undoLayout} disabled={!history.length || isWorking}>Undo</button><button className="button secondary" onClick={exportPlan} disabled={!allPlacements.length || isWorking}>Export layout</button></div></header>
     <section className="workspace">
       <aside className="sidebar left-sidebar">
         <div className="panel-heading"><div><span className="eyebrow">INPUT</span><h1>Parts</h1></div><span className="count-badge">{parts.length}</span></div>

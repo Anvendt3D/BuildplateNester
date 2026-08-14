@@ -1,15 +1,16 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { buildSync } from "esbuild";
 import polygonClipping from "polygon-clipping";
 
 const temporary = mkdtempSync(join(tmpdir(), "printnest-engine-test-"));
 const bundle = join(temporary, "nest-engine.mjs");
-execFileSync(new URL("../node_modules/.bin/esbuild", import.meta.url).pathname, [new URL("../app/nest-engine.ts", import.meta.url).pathname, "--bundle", "--platform=node", "--format=esm", `--outfile=${bundle}`]);
+const source = fileURLToPath(new URL("../app/nest-engine.ts", import.meta.url));
+buildSync({ entryPoints: [source], bundle: true, platform: "node", format: "esm", outfile: bundle });
 const { nestParts } = await import(pathToFileURL(bundle).href);
 test.after(() => rmSync(temporary, { recursive: true, force: true }));
 

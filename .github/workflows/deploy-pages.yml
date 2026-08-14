@@ -24,7 +24,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22.13.0
+          node-version: 22.18.0
           cache: npm
 
       - name: Configure GitHub Pages
@@ -35,8 +35,6 @@ jobs:
 
       - name: Build static site
         run: npm run build:pages
-        env:
-          NEXT_PUBLIC_BASE_PATH: /BuildplateNester
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v4
