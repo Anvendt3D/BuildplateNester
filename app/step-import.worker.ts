@@ -1,13 +1,13 @@
 import { autoTessellation, estimateStepSize, importStep } from "meshstep";
 
 // PrintNest needs a dependable planning mesh, not a presentation-quality CAD mesh.
-// meshStep's defaults target a 0.01 mm chord tolerance on a 100 mm part, which
-// is unnecessarily dense for footprinting and can make an assembly unwieldy.
+// Keep the chord tolerance close enough to preserve the printed silhouette, while
+// allowing substantially larger interior triangles on planar and gentle surfaces.
 function planningTessellation(diagonal: number | undefined) {
   const automatic = diagonal ? autoTessellation(diagonal) : { surfaceDeviation: 0.01, maxEdge: 1 };
   return {
-    surfaceDeviation: Math.min(0.5, Math.max(0.02, automatic.surfaceDeviation * 5)),
-    maxEdge: Math.min(8, Math.max(0.5, automatic.maxEdge * 2.5)),
+    surfaceDeviation: Math.min(0.08, Math.max(0.01, automatic.surfaceDeviation * 2)),
+    maxEdge: Math.min(12, Math.max(1, automatic.maxEdge * 4)),
     normalDeviation: 20,
   };
 }

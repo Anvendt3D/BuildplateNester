@@ -99,35 +99,6 @@ function stageInstances(parts: Part[], current: ProjectPlacement[], activePlateI
   return [...kept.filter((p) => p.plateId !== activePlateId), ...markCollisions([...active, ...added], width, depth, clearance).map((p) => ({ ...p, plateId: activePlateId } as ProjectPlacement))];
 }
 
-async function stageInstancesAsync(parts: Part[], current: ProjectPlacement[], activePlateId: string, width: number, depth: number, clearance: number, shouldCancel: () => boolean) {
-  const wanted = new Set(parts.flatMap((part) => Array.from({ length: part.quantity }, (_, copy) => `${part.id}-${copy + 1}`)));
-  const kept = current.filter((placement) => wanted.has(placement.id)), existingIds = new Set(kept.map((placement) => placement.id));
-  const active = kept.filter((placement) => placement.plateId === activePlateId), added: ProjectPlacement[] = [];
-  let checks = 0, cancelled = false;
-  for (const part of parts) {
-    const b = bounds(part.footprint), partWidth = b.maxX - b.minX, partDepth = b.maxY - b.minY, gridStep = Math.max(2, clearance);
-    const columns = Math.max(1, Math.floor((width - EDGE_MARGIN * 2 - partWidth) / gridStep) + 1);
-    const rows = Math.max(1, Math.floor((depth - EDGE_MARGIN * 2 - partDepth) / gridStep) + 1);
-    let scanIndex = 0;
-    for (let copy = 1; copy <= part.quantity; copy++) {
-      const id = `${part.id}-${copy}`; if (existingIds.has(id)) continue;
-      let found: { x: number; y: number } | null = null;
-      for (; scanIndex < columns * rows; scanIndex++) {
-        if (++checks % 350 === 0) { await new Promise<void>((resolve) => setTimeout(resolve, 0)); if (shouldCancel()) { cancelled = true; break; } }
-        const x = EDGE_MARGIN + (scanIndex % columns) * gridStep, y = EDGE_MARGIN + Math.floor(scanIndex / columns) * gridStep;
-        const world = translateFootprint(part.footprint, x, y);
-        if (![...active, ...added].some((placement) => footprintsOverlap(world, translated(placement), clearance))) { found = { x, y }; scanIndex++; break; }
-      }
-      if (cancelled) break;
-      if (found) added.push({ id, partId: part.id, copy, x: found.x, y: found.y, rotation: 0, footprint: part.footprint, colliding: false, nested: false, plateId: activePlateId, locked: false });
-      else break;
-    }
-    if (cancelled) break;
-  }
-  const placements = [...kept.filter((placement) => placement.plateId !== activePlateId), ...markCollisions([...active, ...added], width, depth, clearance).map((placement) => ({ ...placement, plateId: activePlateId } as ProjectPlacement))];
-  return { placements, cancelled };
-}
-
 function markAllCollisions(placements: ProjectPlacement[], plates: Plate[], width: number, depth: number, clearance: number) {
   return plates.flatMap((plate) => markCollisions(placements.filter((placement) => placement.plateId === plate.id), width, depth, clearance).map((placement) => ({ ...placement, plateId: plate.id } as ProjectPlacement)));
 }
@@ -379,16 +350,18 @@ export default function Home() {
     finally { autoOrientWorkerRef.current?.terminate(); autoOrientWorkerRef.current = null; autoOrientRejectRef.current = null; setCancellableTask(null); setStopRequested(false); setWorkingLabel(null); }
   }
 
-  async function changeQuantity(id: string, quantity: number) {
+  function changeQuantity(id: string, quantity: number) {
     rememberLayout();
     const safe = Math.max(1, Math.min(500, quantity || 1));
-    const next = parts.map((part) => part.id === id ? { ...part, quantity: safe, minQuantity: Math.min(part.minQuantity, safe) } : part);
-    setParts(next); localTaskCancelRef.current = false; setStopRequested(false); setCancellableTask("instances"); setWorkingLabel("Adding instances to the plate…"); await waitForPaint();
-    try {
-      const staged = await stageInstancesAsync(next, allPlacements, activePlateId, bedWidth, bedDepth, clearance, () => localTaskCancelRef.current);
-      setAllPlacements(staged.placements); setUnplacedCount(0);
-      setMessage(staged.cancelled ? `Stopped adding instances. Copies already staged on ${activePlate?.name ?? "the active plate"} were kept.` : `Quantity updated. Copies that fit are staged on ${activePlate?.name ?? "the active plate"}; remaining copies are unassigned.`);
-    } finally { setCancellableTask(null); setStopRequested(false); setWorkingLabel(null); }
+    const current = parts.find((part) => part.id === id); if (!current) return;
+    const added = Math.max(0, safe - current.quantity), removed = Math.max(0, current.quantity - safe);
+    setParts((items) => items.map((part) => part.id === id ? { ...part, quantity: safe, minQuantity: Math.min(part.minQuantity, safe) } : part));
+    // Quantity is a request, not an implicit nesting command. Newly requested
+    // instances are deliberately left unassigned until the user drags them to a
+    // plate or invokes one of the explicit Nest/Fill actions.
+    if (removed) setAllPlacements((currentPlacements) => currentPlacements.filter((placement) => placement.partId !== id || placement.copy <= safe));
+    setUnplacedCount(0); setLayoutOptions([]);
+    setMessage(added ? `${added} instance${added === 1 ? "" : "s"} added as unassigned. Drag them to a plate or choose Nest current.` : removed ? `${removed} instance${removed === 1 ? "" : "s"} removed.` : "Quantity unchanged.");
   }
 
   async function fillPlate(partId: string) {
