@@ -6,9 +6,9 @@ import { autoTessellation, estimateStepSize, importStep } from "meshstep";
 function planningTessellation(diagonal: number | undefined) {
   const automatic = diagonal ? autoTessellation(diagonal) : { surfaceDeviation: 0.01, maxEdge: 1 };
   return {
-    surfaceDeviation: Math.min(0.08, Math.max(0.01, automatic.surfaceDeviation * 2)),
-    maxEdge: Math.min(12, Math.max(1, automatic.maxEdge * 4)),
-    normalDeviation: 20,
+    surfaceDeviation: Math.min(0.25, Math.max(0.03, automatic.surfaceDeviation * 4)),
+    maxEdge: Math.min(16, Math.max(1.5, automatic.maxEdge * 6)),
+    normalDeviation: 25,
   };
 }
 

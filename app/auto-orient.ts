@@ -25,7 +25,7 @@ function quantizedNormalKey(normal: Vec3) {
   return `${Math.round(normal.x * 1000)},${Math.round(normal.y * 1000)},${Math.round(normal.z * 1000)}`;
 }
 
-function sampledFaces(meshes: ModelMesh[], maxFaces = 80_000) {
+function sampledFaces(meshes: ModelMesh[], maxFaces = 24_000) {
   const triangleCounts = meshes.map((mesh) => (mesh.indices.length || mesh.positions.length / 3) / 3);
   const totalTriangles = triangleCounts.reduce((sum, count) => sum + count, 0);
   const sampleRatio = Math.min(1, maxFaces / Math.max(1, totalTriangles)), sampleThreshold = sampleRatio * 0x1_0000_0000;
