@@ -55,28 +55,39 @@ function unionTriangles(raw: RawTriangle[], precision: number): Footprint {
 }
 
 export function silhouetteFromMeshes(meshes: ModelMesh[], orientation: QuaternionTuple): Footprint {
-  const triangles: RawTriangle[] = [], projectedPoints: Point[] = [];
+  const upwardTriangles: RawTriangle[] = [], allTriangles: RawTriangle[] = [], projectedPoints: Point[] = [];
   for (const mesh of meshes) {
     const indices = mesh.indices.length ? mesh.indices : Array.from({ length: mesh.positions.length / 3 }, (_, i) => i);
     for (let i = 0; i + 2 < indices.length; i += 3) {
-      const triangle = [indices[i], indices[i + 1], indices[i + 2]].map((index) => {
+      const points = [indices[i], indices[i + 1], indices[i + 2]].map((index) => {
         const point = rotateVector(vec3(mesh.positions[index * 3], mesh.positions[index * 3 + 1], mesh.positions[index * 3 + 2]), orientation);
-        projectedPoints.push({ x: point.x, y: point.y }); return [point.x, point.y] as [number, number];
-      }) as RawTriangle;
+        projectedPoints.push({ x: point.x, y: point.y }); return point;
+      });
+      const triangle = points.map((point) => [point.x, point.y]) as RawTriangle;
       const twiceArea = Math.abs((triangle[1][0] - triangle[0][0]) * (triangle[2][1] - triangle[0][1]) - (triangle[1][1] - triangle[0][1]) * (triangle[2][0] - triangle[0][0]));
-      if (twiceArea > EPS) triangles.push(triangle);
+      if (twiceArea > EPS) {
+        allTriangles.push(triangle);
+        const normalZ = (points[1].x - points[0].x) * (points[2].y - points[0].y) - (points[1].y - points[0].y) * (points[2].x - points[0].x);
+        if (normalZ > EPS) upwardTriangles.push(triangle);
+      }
     }
   }
-  if (!triangles.length) return [];
+  if (!allTriangles.length) return [];
 
   // CAD tessellations often contain almost-identical edges. Retry on progressively
   // coarser sub-millimetre grids before using a guaranteed non-throwing fallback.
-  for (const precision of [0.0001, 0.001, 0.01, 0.05, 0.1]) {
-    try {
-      const result = unionTriangles(triangles, precision);
-      if (result.length) return result;
-    } catch {
-      // Retry with a slightly coarser grid; this removes near-coincident sliver edges.
+  // A solid's upper-facing skin alone covers its projected footprint. Using it
+  // first eliminates the duplicate underside and side-wall projections that can
+  // overwhelm polygon clipping and trigger the old convex-hull fallback.
+  for (const source of [upwardTriangles, allTriangles]) {
+    if (!source.length) continue;
+    for (const precision of [0.00001, 0.0001, 0.001, 0.01, 0.05]) {
+      try {
+        const result = unionTriangles(source, precision);
+        if (result.length) return result;
+      } catch {
+        // Retry with a slightly coarser grid; this removes near-coincident sliver edges.
+      }
     }
   }
   return normalizeFootprint(footprintFromRing(convexHull(projectedPoints)));

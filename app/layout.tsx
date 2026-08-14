@@ -11,7 +11,7 @@ export const metadata: Metadata = {
   title: "PrintNest",
   description: "Browser-based STEP nesting for additive manufacturing.",
   other: { "codex-preview": "development" },
-  icons: { icon: "./favicon.svg", shortcut: "./favicon.svg" },
+  icons: { icon: "./favicon.ico", shortcut: "./favicon.ico" },
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

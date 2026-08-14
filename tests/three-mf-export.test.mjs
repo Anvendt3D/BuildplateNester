@@ -28,6 +28,7 @@ test("exports a portable standards-only 3MF for a single plate", async () => {
   assert.equal((model.match(/<object id=/g) ?? []).length, 1);
   assert.equal((model.match(/<item objectid=/g) ?? []).length, 1);
   assert.doesNotMatch(model, /BambuStudio|Metadata\//);
+  assert.match(strFromU8(files["[Content_Types].xml"]), /<Override PartName="\/3D\/3dmodel\.model" ContentType="application\/vnd\.ms-package\.3dmanufacturing-3dmodel\+xml"\/>/);
 });
 
 test("archives independent 3MF files for multiple plates", async () => {
