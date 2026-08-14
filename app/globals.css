@@ -173,9 +173,15 @@ a.button { display: inline-flex; align-items: center; justify-content: center; c
 .three-inputs span { display: grid; grid-template-columns: 20px 1fr; align-items: center; border: 1px solid #cbd2cd; }
 .three-inputs small { text-align: center; font: 750 9px var(--font-geist-mono), monospace; color: #7b867f; }
 .three-inputs input { min-width: 0; width: 100%; border: 0; border-left: 1px solid #e4e8e5; padding: 8px 3px; font: 700 10px var(--font-geist-mono), monospace; }
-.range-row { display: grid; grid-template-columns: 1fr 60px; gap: 10px; align-items: center; }
-.range-row input { accent-color: var(--accent); }
-.range-row output { font: 700 10px var(--font-geist-mono), monospace; text-align: right; }
+.range-row { display: grid; grid-template-columns: minmax(0, 1fr) 52px 18px; gap: 8px; align-items: center; }
+.range-row input[type="range"] { width: 100%; -webkit-appearance: none; appearance: none; height: 3px; border-radius: 2px; background: var(--line); cursor: pointer; outline: none; }
+.range-row input[type="range"]::-webkit-slider-thumb { width: 14px; height: 14px; -webkit-appearance: none; appearance: none; border: 0; border-radius: 50%; background: var(--accent); cursor: grab; }
+.range-row input[type="range"]::-webkit-slider-thumb:active { cursor: grabbing; background: var(--accent-dark); }
+.range-row input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; border: 0; border-radius: 50%; background: var(--accent); cursor: grab; }
+.range-row .clearance-value { width: 52px; min-width: 0; height: 27px; padding: 2px 6px; border: 1px solid var(--line); border-radius: 5px; background: white; color: var(--ink); text-align: right; font: 700 11px var(--font-geist-mono), monospace; font-variant-numeric: tabular-nums; -moz-appearance: textfield; }
+.range-row .clearance-value::-webkit-inner-spin-button, .range-row .clearance-value::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.range-row .clearance-value:focus { outline: none; border-color: var(--accent); }
+.range-row > span { color: var(--muted); font: 10px var(--font-geist-mono), monospace; }
 .switch-row { display: flex; justify-content: space-between; gap: 15px; align-items: center; }
 .switch-row label { margin: 0 0 4px; }
 .switch-row p { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
