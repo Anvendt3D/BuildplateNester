@@ -7,7 +7,7 @@ All geometry processing, nesting, previews, project saving, and exports run in t
 ## What it does
 
 - Imports `.step`, `.stp`, and `.stl` part files directly in the browser
-- Converts STEP geometry locally using the bundled OpenCascade WebAssembly engine
+- Converts STEP geometry locally with meshStep using a planning-oriented tessellation preset
 - Calculates oriented 2D footprints from imported meshes
 - Plans layouts for common printer beds or custom bed dimensions
 - Supports quantities, priorities, minimum quantities, edge clearance, locked placements, and manual placement edits
@@ -15,7 +15,7 @@ All geometry processing, nesting, previews, project saving, and exports run in t
 - Plans across multiple plates, including overflow, consolidation, and production-set workflows
 - Previews and adjusts 3D part orientation before nesting
 - Saves the active project in browser IndexedDB on the current device
-- Exports placement data as JSON and placements as 3MF projects for OrcaSlicer, Bambu Studio, or PrusaSlicer
+- Exports placement data as JSON and verified, standards-compliant 3MF files for OrcaSlicer, Bambu Studio, or PrusaSlicer
 
 ## Method
 
@@ -23,7 +23,7 @@ All geometry processing, nesting, previews, project saving, and exports run in t
 2. **Orient for print** — choose a print face manually or use the orientation helper. The resulting footprint and height are recalculated.
 3. **Define the plate** — select a printer or enter custom X, Y, and Z limits. PrintNest enforces an edge safety margin and chosen part clearance.
 4. **Nest** — the search evaluates eligible positions and XY rotations in the browser. The selected effort and objective trade run time against packing quality.
-5. **Review and export** — inspect collisions and unassigned copies, make manual changes, then export a verified 3MF handoff for the slicer.
+5. **Review and export** — inspect collisions and unassigned copies, make manual changes, then export a verified 3MF handoff for the slicer. Multi-plate jobs download as a ZIP containing one standard 3MF per plate, avoiding slicer-specific project metadata.
 
 The nesting engine uses original geometry footprints for its final collision checks. It does not send model geometry or project data to a service.
 
