@@ -8,10 +8,10 @@ const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "PrintNest",
-  description: "Browser-based STEP nesting for additive manufacturing.",
+  title: "BumpMesh · Build Plate Nesting",
+  description: "Browser-based build plate nesting for additive manufacturing.",
   other: { "codex-preview": "development" },
-  icons: { icon: "./favicon.ico", shortcut: "./favicon.ico" },
+  icons: { icon: "/logo.png", shortcut: "/logo.png" },
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
