@@ -185,7 +185,11 @@ export default function Home() {
       const restoredPlates = project.plates?.length ? project.plates : [{ id: "plate-1", name: "Plate 1", locked: false }];
       const restoredActive = restoredPlates.some((plate) => plate.id === project.activePlateId) ? project.activePlateId! : restoredPlates[0].id;
       const restoredWidth = project.bedWidth ?? 256, restoredDepth = project.bedDepth ?? 256, restoredClearance = project.clearance ?? 2;
-      const migratedPlacements = (project.placements ?? []).map((placement) => ({ ...placement, plateId: placement.plateId ?? restoredPlates[0].id, locked: placement.locked ?? false } as ProjectPlacement));
+      const restoredPartById = new Map(restoredParts.map((part) => [part.id, part]));
+      const migratedPlacements = (project.placements ?? []).map((placement) => {
+        const part = restoredPartById.get(placement.partId);
+        return { ...placement, footprint: part ? transformFootprint(part.footprint, placement.rotation) : placement.footprint, plateId: placement.plateId ?? restoredPlates[0].id, locked: placement.locked ?? false } as ProjectPlacement;
+      });
       setParts(restoredParts); setPlates(restoredPlates); setActivePlateId(restoredActive); setAllPlacements(markAllCollisions(migratedPlacements, restoredPlates, restoredWidth, restoredDepth, restoredClearance)); setPrinterId(project.printerId ?? "custom");
       setBedWidth(project.bedWidth ?? 256); setBedDepth(project.bedDepth ?? 256); setBedHeight(project.bedHeight ?? 256); setClearance(project.clearance ?? 2); setClearanceDraft((project.clearance ?? 2).toFixed(1));
       setAutoRotate(project.autoRotate ?? true); setRotationEffort(project.rotationEffort ?? "balanced"); setSearchPreset(project.searchPreset ?? "balanced"); setUiMode(project.uiMode ?? "simple"); setNestingStart(project.nestingStart ?? "corner"); setOutlinePrecision(project.outlinePrecision ?? "standard"); setObjective(project.objective ?? "balanced"); setPreferredSlicer(project.preferredSlicer ?? "orca"); setMaxPlates(project.maxPlates ?? 10); setKeepSetsTogether(project.keepSetsTogether ?? false);
