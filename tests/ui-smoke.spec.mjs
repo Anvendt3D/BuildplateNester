@@ -31,6 +31,7 @@ test("PrintNest keeps controls legible, adjusts clearance by wheel, and fills a 
   await expect(page.getByText(/fixed coarse proxy/i)).toBeVisible();
   await page.screenshot({ path: "test-results/printnest-orientation-workflow.png", fullPage: true });
   await page.getByRole("button", { name: "Cancel orientation" }).click();
+  await page.locator("#fill-mode").selectOption("repack");
   await page.getByRole("button", { name: /Fill plate with square/i }).click();
   await expect(page.locator(".status-strip")).toContainText(/441 regular-grid copies/i);
   await expect(page.locator("svg.build-plate g.plate-part")).toHaveCount(441);

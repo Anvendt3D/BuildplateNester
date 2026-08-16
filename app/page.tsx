@@ -225,7 +225,7 @@ export default function Home() {
       worker.onmessage = (event: MessageEvent<{ type: "progress"; progress: NestProgress; jobId?: string } | { type: "result"; result: NestBatchResult; jobId?: string } | { type: "error"; message: string; jobId?: string }>) => {
         if (event.data.jobId !== jobId) return;
         if (event.data.type === "progress") {
-          progressByPass.set(attempt, event.data.progress); if (event.data.progress.placed.length >= bestProgress.length) { bestProgress = event.data.progress.placed; const now = performance.now(); if (onProgress || now - livePreviewAtRef.current > 16 || event.data.progress.processed === event.data.progress.total) { livePreviewAtRef.current = now; (onProgress ?? ((next) => setPlacements(next)))(bestProgress); } }
+          progressByPass.set(attempt, event.data.progress); if (event.data.progress.placed.length > bestProgress.length) { bestProgress = event.data.progress.placed; const now = performance.now(); if (onProgress || now - livePreviewAtRef.current > 80 || event.data.progress.processed === event.data.progress.total) { livePreviewAtRef.current = now; (onProgress ?? ((next) => setPlacements(next)))(bestProgress); } }
           const progress = [...progressByPass.values()], processed = progress.reduce((sum, item) => sum + item.processed, 0), total = eligible.reduce((sum, part) => sum + (part.copies?.length ?? part.quantity), 0) * attempts.length;
           setNestProgress({ placed: bestProgress.length, processed, total, candidateChecks: progress.reduce((sum, item) => sum + item.candidateChecks, 0), attempt: progressByPass.size, attempts: attempts.length });
         }
@@ -453,6 +453,19 @@ export default function Home() {
         const fittedProject = allPlacements.filter((placement) => placement.plateId !== activePlateId && placement.partId === partId).length + activeResult.filter((placement) => placement.partId === partId).length;
         setParts((current) => current.map((part) => part.id === partId ? { ...part, quantity: Math.max(1, fittedProject), minQuantity: Math.min(part.minQuantity, Math.max(1, fittedProject)) } : part));
         setMessage(stopped ? `Stopped filling and kept every completed wave. ${fittedProject} copies of ${target.name} remain placed.` : `Filled the remaining usable space on ${activePlate?.name} without moving existing parts.`);
+        return;
+      }
+      // A one-part repack has an exact, immediate grid solution. Do not create
+      // hundreds of speculative copies merely to discover the capacity.
+      if (fillMode === "repack" && parts.length === 1 && parts[0].id === partId) {
+        const fixed = placements.filter((placement) => placement.locked), fixedIds = new Set(fixed.map((placement) => placement.id));
+        const copies = Array.from({ length: 500 }, (_, index) => index + 1).filter((copy) => !fixedIds.has(`${partId}-${copy}`));
+        const gridPlacements = fillRepeatedPartGrid({ part: target, copies, width: bedWidth, depth: bedDepth, clearance, edgeMargin: EDGE_MARGIN, fixed });
+        const activeResult = [...fixed, ...gridPlacements];
+        setPlacements(activeResult); setNestProgress({ placed: activeResult.length, processed: gridPlacements.length, total: gridPlacements.length, candidateChecks: gridPlacements.length, attempt: 1, attempts: 1 });
+        const fittedProject = allPlacements.filter((placement) => placement.plateId !== activePlateId && placement.partId === partId).length + activeResult.filter((placement) => placement.partId === partId).length;
+        setParts((current) => current.map((part) => part.id === partId ? { ...part, quantity: Math.max(1, fittedProject), minQuantity: Math.min(part.minQuantity, Math.max(1, fittedProject)) } : part));
+        setMessage(`Repacked ${activePlate?.name ?? "the active plate"} with ${activeResult.length} regular-grid copies of ${target.name}.`);
         return;
       }
       const occupiedElsewhere = new Set(allPlacements.filter((placement) => placement.plateId !== activePlateId).map((placement) => placement.id));
