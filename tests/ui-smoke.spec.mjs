@@ -14,14 +14,25 @@ test("PrintNest keeps controls legible, adjusts clearance by wheel, and fills a 
   expect(contrast).not.toBe("rgb(0, 0, 0)");
 
   const clearance = page.locator("#clearance");
+  const sidebar = page.locator(".controls-sidebar");
+  const sidebarScrollBefore = await sidebar.evaluate((node) => node.scrollTop);
   await clearance.hover();
   await page.mouse.wheel(0, -100);
   await expect(clearance).toHaveValue("2.1");
+  await expect.poll(() => sidebar.evaluate((node) => node.scrollTop)).toBe(sidebarScrollBefore);
   await clearance.fill("2");
   await expect(clearance).toHaveValue("2");
 
   await page.locator('input[type="file"]').setInputFiles({ name: "square.stl", mimeType: "model/stl", buffer: Buffer.from(squareStl()) });
   await expect(page.getByRole("button", { name: /Fill plate with square/i })).toBeVisible();
+  await page.getByRole("button", { name: /Orient square/i }).click();
+  await expect(page.getByRole("heading", { name: "Choose what rests on the plate" })).toBeVisible();
+  await expect(page.getByText("BUILD PLATE GRID", { exact: true })).toBeVisible();
+  const detail = page.locator("#nesting-mesh-detail");
+  await detail.fill("2000");
+  await expect(page.getByText("2,000 triangles / mesh")).toBeVisible();
+  await page.screenshot({ path: "test-results/printnest-orientation-workflow.png", fullPage: true });
+  await page.getByRole("button", { name: "Cancel orientation" }).click();
   await page.getByRole("button", { name: /Fill plate with square/i }).click();
   await expect(page.locator(".status-strip")).toContainText(/441 regular-grid copies/i);
   await expect(page.locator("svg.build-plate g.plate-part")).toHaveCount(441);

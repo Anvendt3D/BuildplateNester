@@ -15,14 +15,17 @@ function pointInPolygon(point: { x: number; y: number }, polygon: Array<{ x: num
   return inside;
 }
 
-export default function OrientationViewer({ meshes, orientation, onFaceSelected }: {
+export default function OrientationViewer({ meshes, orientation, selectedFaceNormal, onFaceSelected }: {
   meshes: ModelMesh[];
   orientation: QuaternionTuple;
+  selectedFaceNormal: [number, number, number] | null;
   onFaceSelected: (worldNormal: [number, number, number]) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const callbackRef = useRef(onFaceSelected);
+  const selectedNormalRef = useRef<[number, number, number] | null>(null);
   useEffect(() => { callbackRef.current = onFaceSelected; }, [onFaceSelected]);
+  useEffect(() => { selectedNormalRef.current = selectedFaceNormal; }, [selectedFaceNormal]);
 
   useEffect(() => {
     const canvas = canvasRef.current, parent = canvas?.parentElement;
@@ -58,6 +61,8 @@ export default function OrientationViewer({ meshes, orientation, onFaceSelected 
           const pa = project(a), pb = project(b); context.beginPath(); context.moveTo(pa.x, pa.y); context.lineTo(pb.x, pb.y); context.stroke();
         }
       }
+      context.fillStyle = "#8f80ff"; context.font = "700 10px ui-monospace, monospace";
+      context.fillText("BUILD PLATE · selected face rests here", 16, height - 18);
 
       const triangles: Array<DrawnFace & { color: string; shade: number }> = [];
       let vertexOffset = 0;
@@ -80,7 +85,8 @@ export default function OrientationViewer({ meshes, orientation, onFaceSelected 
       triangles.sort((a, b) => a.depth - b.depth); faces = triangles;
       for (const face of triangles) {
         context.beginPath(); context.moveTo(face.points[0].x, face.points[0].y); context.lineTo(face.points[1].x, face.points[1].y); context.lineTo(face.points[2].x, face.points[2].y); context.closePath();
-        context.fillStyle = face.color; context.fill(); context.strokeStyle = "rgba(20,32,25,.16)"; context.lineWidth = 0.6; context.stroke();
+        const selected = selectedNormalRef.current && dot3(face.normal, vec3(...selectedNormalRef.current)) > .999;
+        context.fillStyle = selected ? "#9b8dff" : face.color; context.fill(); context.strokeStyle = selected ? "#ffffff" : "rgba(20,32,25,.16)"; context.lineWidth = selected ? 2 : .6; context.stroke();
       }
     };
 
@@ -97,7 +103,7 @@ export default function OrientationViewer({ meshes, orientation, onFaceSelected 
     const wheel = (event: WheelEvent) => { event.preventDefault(); zoom = Math.max(0.45, Math.min(3, zoom * (event.deltaY > 0 ? 0.9 : 1.1))); draw(); };
     canvas.addEventListener("pointerdown", pointerDown); canvas.addEventListener("pointermove", pointerMove); canvas.addEventListener("pointerup", pointerUp); canvas.addEventListener("wheel", wheel, { passive: false });
     return () => { resizeObserver.disconnect(); canvas.removeEventListener("pointerdown", pointerDown); canvas.removeEventListener("pointermove", pointerMove); canvas.removeEventListener("pointerup", pointerUp); canvas.removeEventListener("wheel", wheel); };
-  }, [meshes, orientation]);
+  }, [meshes, orientation, selectedFaceNormal]);
 
   return <div className="orientation-canvas"><canvas ref={canvasRef} aria-label="Interactive software-rendered 3D orientation preview" /></div>;
 }

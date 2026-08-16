@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, DragEvent, PointerEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, DragEvent, PointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import OrientationViewer, { ModelMesh } from "./orientation-viewer";
 import { QuaternionTuple, eulerFromQuaternion, multiplyQuaternion, normalize3, quaternionFromEuler, quaternionFromUnitVectors, rotateVector, vec3 } from "./geometry3d";
 import { Footprint, footprintArea, footprintBounds, footprintFromRing, footprintPath, footprintsOverlap, silhouetteFromMeshes, transformFootprint, translateFootprint } from "./footprint";
@@ -142,14 +142,14 @@ export default function Home() {
   const [searchPreset, setSearchPreset] = useState<SearchPreset>("balanced"), [uiMode, setUiMode] = useState<"simple" | "advanced">("simple"), [primaryNestAction, setPrimaryNestAction] = useState<"smart" | "current" | "all" | "add">("smart");
   const [objective, setObjective] = useState<OptimizationObjective>("balanced"), [layoutOptions, setLayoutOptions] = useState<LayoutOption[]>([]), [history, setHistory] = useState<LayoutSnapshot[]>([]);
   const [storageReady, setStorageReady] = useState(false), [saveStatus, setSaveStatus] = useState<"saved" | "saving" | "error">("saved");
-  const [isImporting, setIsImporting] = useState(false), [message, setMessage] = useState("Add STEP files or load the example set."), [orientingId, setOrientingId] = useState<string | null>(null), [orientationDraft, setOrientationDraft] = useState<Part | null>(null);
+  const [isImporting, setIsImporting] = useState(false), [message, setMessage] = useState("Add STEP files or load the example set."), [orientingId, setOrientingId] = useState<string | null>(null), [orientationDraft, setOrientationDraft] = useState<Part | null>(null), [selectedFaceNormal, setSelectedFaceNormal] = useState<[number, number, number] | null>(null), [orientationTriangleBudget, setOrientationTriangleBudget] = useState(6_000);
   const [preferredSlicer, setPreferredSlicer] = useState<SlicerTarget>("orca"), [selectedPartId, setSelectedPartId] = useState<string | null>(null), [selectedPlacementId, setSelectedPlacementId] = useState<string | null>(null), [selectedPlacementIds, setSelectedPlacementIds] = useState<string[]>([]), [manualRotationStep, setManualRotationStep] = useState(15), [showUnplaced, setShowUnplaced] = useState(false);
   const [maxPlates, setMaxPlates] = useState(10), [keepSetsTogether, setKeepSetsTogether] = useState(false), [batchSets, setBatchSets] = useState(1), [fillMode, setFillMode] = useState<"remaining" | "repack" | "existing" | "batch">("remaining");
   const [workingLabel, setWorkingLabel] = useState<string | null>(null);
   const [nestingMode, setNestingMode] = useState<"layout" | "fill" | null>(null), [cancellableTask, setCancellableTask] = useState<"instances" | "orientation" | null>(null), [stopRequested, setStopRequested] = useState(false);
   const [nestProgress, setNestProgress] = useState({ placed: 0, processed: 0, total: 0, candidateChecks: 0, attempt: 1, attempts: 4 });
   const [dragging, setDragging] = useState<{ id: string; startX: number; startY: number; originX: number; originY: number } | null>(null);
-  const fileInput = useRef<HTMLInputElement>(null), workerPoolRef = useRef<Worker[]>([]), activeWorkersRef = useRef<Worker[]>([]), autoOrientWorkerRef = useRef<Worker | null>(null), autoOrientRejectRef = useRef<((reason?: unknown) => void) | null>(null), localTaskCancelRef = useRef(false), livePreviewAtRef = useRef(0), dragPayloadRef = useRef<{ type: "placements" | "part"; ids?: string[]; partId?: string } | null>(null), orientingPart = orientationDraft;
+  const fileInput = useRef<HTMLInputElement>(null), clearanceControlRef = useRef<HTMLDivElement>(null), clearanceValueRef = useRef(2), clearanceCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null), workerPoolRef = useRef<Worker[]>([]), activeWorkersRef = useRef<Worker[]>([]), autoOrientWorkerRef = useRef<Worker | null>(null), autoOrientRejectRef = useRef<((reason?: unknown) => void) | null>(null), localTaskCancelRef = useRef(false), livePreviewAtRef = useRef(0), dragPayloadRef = useRef<{ type: "placements" | "part"; ids?: string[]; partId?: string } | null>(null), orientingPart = orientationDraft;
   const activePlate = plates.find((plate) => plate.id === activePlateId) ?? plates[0];
   const placements = allPlacements.filter((placement) => placement.plateId === activePlateId);
   const setPlacements = (update: Placement[] | ((current: Placement[]) => Placement[])) => setAllPlacements((current) => {
@@ -168,6 +168,9 @@ export default function Home() {
   const geometryPoints = parts.reduce((sum, part) => sum + part.footprint.reduce((polygonSum, polygon) => polygonSum + polygon.reduce((ringSum, ring) => ringSum + ring.length, 0), 0), 0);
   const estimatedSeconds = Math.max(1, Math.round((requestedCount + 1) * Math.max(1, geometryPoints / Math.max(1, parts.length * 35)) * (searchPreset === "quick" ? .18 : searchPreset === "best" ? 1.8 : .65)));
   const estimateLabel = estimatedSeconds < 8 ? "a few seconds" : estimatedSeconds < 55 ? `about ${Math.ceil(estimatedSeconds / 5) * 5} seconds` : `about ${Math.ceil(estimatedSeconds / 60)} minute${Math.ceil(estimatedSeconds / 60) === 1 ? "" : "s"}`;
+
+  useEffect(() => { clearanceValueRef.current = clearance; }, [clearance]);
+  useEffect(() => () => { if (clearanceCommitTimerRef.current) clearTimeout(clearanceCommitTimerRef.current); }, []);
 
   useEffect(() => {
     let active = true;
@@ -286,9 +289,22 @@ export default function Home() {
   }
   function updateClearance(value: number) {
     const safe = Math.round(Math.max(0, Math.min(15, Number.isFinite(value) ? value : clearance)) * 10) / 10;
+    if (clearanceCommitTimerRef.current) { clearTimeout(clearanceCommitTimerRef.current); clearanceCommitTimerRef.current = null; }
     setClearance(safe); setClearanceDraft(safe.toFixed(1)); setAllPlacements((current) => markAllCollisions(current, plates, bedWidth, bedDepth, safe));
   }
-  function adjustClearanceByWheel(deltaY: number) { updateClearance(clearance + (deltaY < 0 ? .1 : -.1)); }
+  const queueClearanceUpdate = useCallback((value: number) => {
+    const safe = Math.round(Math.max(0, Math.min(15, Number.isFinite(value) ? value : clearanceValueRef.current)) * 10) / 10;
+    clearanceValueRef.current = safe; setClearance(safe); setClearanceDraft(safe.toFixed(1));
+    if (clearanceCommitTimerRef.current) clearTimeout(clearanceCommitTimerRef.current);
+    clearanceCommitTimerRef.current = setTimeout(() => { clearanceCommitTimerRef.current = null; setAllPlacements((current) => markAllCollisions(current, plates, bedWidth, bedDepth, safe)); }, 140);
+  }, [bedDepth, bedWidth, plates]);
+  const adjustClearanceByWheel = useCallback((deltaY: number) => { queueClearanceUpdate(clearanceValueRef.current + (deltaY < 0 ? .1 : -.1)); }, [queueClearanceUpdate]);
+  useEffect(() => {
+    const control = clearanceControlRef.current; if (!control) return;
+    const onWheel = (event: WheelEvent) => { event.preventDefault(); event.stopPropagation(); adjustClearanceByWheel(event.deltaY); };
+    control.addEventListener("wheel", onWheel, { passive: false });
+    return () => control.removeEventListener("wheel", onWheel);
+  }, [adjustClearanceByWheel]);
 
   async function importFiles(files: FileList | File[]) {
     const selected = Array.from(files).filter((file) => /\.(stp|step|stl)$/i.test(file.name));
@@ -328,9 +344,9 @@ export default function Home() {
 
   function openOrientation(id: string) {
     const source = parts.find((part) => part.id === id); if (!source?.meshes.length) return;
-    setOrientingId(id); setOrientationDraft(source); setSelectedPartId(id); setSelectedPlacementId(null);
+    setOrientingId(id); setOrientationDraft(source); setSelectedFaceNormal(null); setOrientationTriangleBudget(Math.max(2_000, Math.min(30_000, Math.max(...(source.nestingMeshes ?? source.meshes).map(meshTriangleCount))))); setSelectedPartId(id); setSelectedPlacementId(null);
   }
-  function closeOrientation() { setOrientingId(null); setOrientationDraft(null); }
+  function closeOrientation() { setOrientingId(null); setOrientationDraft(null); setSelectedFaceNormal(null); }
   function applyOrientation() {
     if (!orientingPart || !orientingId) return;
     commitOrientation(orientingId, orientingPart, `Applied the new orientation to ${orientingPart.name}.`); closeOrientation();
@@ -571,10 +587,17 @@ export default function Home() {
       setWorkingLabel("Stopping instance placement…");
     }
   }
-  function laySelectedFace(normal: [number, number, number]) {
-    if (!orientingPart) return;
+  function laySelectedFace() {
+    const normal = selectedFaceNormal;
+    if (!orientingPart || !normal) return;
     const delta = quaternionFromUnitVectors(normalize3(vec3(...normal)), vec3(0, 0, -1));
-    orientPart(orientingPart.id, multiplyQuaternion(delta, orientingPart.orientation), `Laid ${orientingPart.name} on the selected face.`);
+    setSelectedFaceNormal(null); orientPart(orientingPart.id, multiplyQuaternion(delta, orientingPart.orientation), `Placed the selected face of ${orientingPart.name} on the build plate.`);
+  }
+  function setOrientationMeshDetail(triangleBudget: number) {
+    if (!orientingPart) return;
+    const safe = Math.round(Math.max(2_000, Math.min(30_000, triangleBudget)) / 1_000) * 1_000;
+    setOrientationTriangleBudget(safe); setSelectedFaceNormal(null);
+    setOrientationDraft(updateGeometry({ ...orientingPart, nestingMeshes: orientingPart.meshes.map((mesh) => coarsenMeshForNesting(mesh, safe)) }, orientingPart.orientation));
   }
   function setEuler(axis: "x" | "y" | "z", value: number) {
     if (!orientingPart) return; const euler = eulerFromQuaternion(orientingPart.orientation); euler[axis] = value * Math.PI / 180;
@@ -717,7 +740,7 @@ export default function Home() {
         <section className="workflow-steps" aria-label="PrintNest workflow"><div className={!parts.length ? "active" : "complete"}><b>1</b><span><strong>Import parts</strong><small>Drop STEP or STL files in the Parts panel.</small></span></div><div className={parts.length && !allPlacements.length ? "active" : allPlacements.length ? "complete" : ""}><b>2</b><span><strong>Set up & nest</strong><small>Choose the printer, clearance, then generate a layout.</small></span></div><div className={allPlacements.length ? "active" : ""}><b>3</b><span><strong>Export</strong><small>Download the ready-to-slice 3MF when the layout is final.</small></span></div></section>
         <div className="control-group"><div className="label-with-help"><label htmlFor="printer">Printer profile</label><HelpTip label="printer profile">Sets the nominal width, depth and height automatically. Choosing or editing a dimension switches to a custom build volume.</HelpTip></div><select id="printer" className="printer-select" value={printerId} onChange={(e) => applyPrinter(e.target.value)}><option value="custom">Custom build volume</option>{brands.map((brand) => <optgroup key={brand} label={brand}>{PRINTERS.filter((p) => p.brand === brand).map((p) => <option key={p.id} value={p.id}>{p.name} — {p.width}×{p.depth}×{p.height}</option>)}</optgroup>)}</select><p className="field-note">Nominal build volume; slicer exclusion zones may reduce usable area.</p></div>
         {uiMode === "advanced" && <div className="control-group"><div className="label-with-help"><label>Build volume</label><HelpTip label="build volume">W and D are the nominal machine dimensions. PrintNest reserves 2 mm on every edge, reducing usable width and depth by 4 mm. H rejects over-height parts.</HelpTip></div><div className="three-inputs"><span><small>W</small><input aria-label="Build width" type="number" value={bedWidth} onChange={(e) => setCustomBed("width", Number(e.target.value))} /></span><span><small>D</small><input aria-label="Build depth" type="number" value={bedDepth} onChange={(e) => setCustomBed("depth", Number(e.target.value))} /></span><span><small>H</small><input aria-label="Build height" type="number" value={bedHeight} onChange={(e) => setCustomBed("height", Number(e.target.value))} /></span></div><p className="field-note">Usable nesting area: {bedWidth - EDGE_MARGIN * 2} × {bedDepth - EDGE_MARGIN * 2} mm after the fixed edge safety.</p></div>}
-        <div className="control-group clearance-control"><div className="label-with-help"><label htmlFor="clearance">Part clearance</label><HelpTip label="part clearance">Minimum edge-to-edge gap between models. Drag for quick adjustment or type an exact value. This is separate from the fixed 2 mm plate-edge safety.</HelpTip></div><div className="range-row"><input id="clearance" type="range" min="0" max="15" step="0.1" value={clearance} style={{ background: `linear-gradient(to right, var(--accent) ${clearance / 15 * 100}%, #3b3b48 ${clearance / 15 * 100}%)` }} onWheel={(event) => { event.preventDefault(); adjustClearanceByWheel(event.deltaY); }} onChange={(e) => updateClearance(Number(e.target.value))} /><label className="clearance-number"><input aria-label="Part clearance in millimetres" type="number" min="0" max="15" step="0.1" inputMode="decimal" value={clearanceDraft} onWheel={(event) => { event.preventDefault(); adjustClearanceByWheel(event.deltaY); }} onChange={(e) => setClearanceDraft(e.target.value)} onBlur={() => { if (!clearanceDraft.trim()) { setClearanceDraft(clearance.toFixed(1)); return; } const next = Number(clearanceDraft); if (Number.isFinite(next)) updateClearance(next); else setClearanceDraft(clearance.toFixed(1)); }} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} /><span>mm</span></label></div><div className="slider-labels"><span>0</span><span>15 mm</span></div></div>
+        <div className="control-group clearance-control" ref={clearanceControlRef}><div className="label-with-help"><label htmlFor="clearance">Part clearance</label><HelpTip label="part clearance">Minimum edge-to-edge gap between models. Scroll or drag for quick adjustment; collision checks run after you pause. This is separate from the fixed 2 mm plate-edge safety.</HelpTip></div><div className="range-row"><input id="clearance" type="range" min="0" max="15" step="0.1" value={clearance} style={{ background: `linear-gradient(to right, var(--accent) ${clearance / 15 * 100}%, #3b3b48 ${clearance / 15 * 100}%)` }} onChange={(e) => queueClearanceUpdate(Number(e.target.value))} /><label className="clearance-number"><input aria-label="Part clearance in millimetres" type="number" min="0" max="15" step="0.1" inputMode="decimal" value={clearanceDraft} onChange={(e) => setClearanceDraft(e.target.value)} onBlur={() => { if (!clearanceDraft.trim()) { setClearanceDraft(clearance.toFixed(1)); return; } const next = Number(clearanceDraft); if (Number.isFinite(next)) updateClearance(next); else setClearanceDraft(clearance.toFixed(1)); }} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} /><span>mm</span></label></div><div className="slider-labels"><span>0</span><span>15 mm</span></div></div>
         <div className="primary-nest"><strong>Generate layout</strong><span>Arrange the imported parts on the active plate, or distribute them across plates.</span><select aria-label="Nest project action" value={primaryNestAction} onChange={(event) => setPrimaryNestAction(event.target.value as typeof primaryNestAction)}><option value="smart">Smart — choose automatically</option><option value="current">Current plate only</option><option value="all">All existing plates</option><option value="add">All plates + add overflow</option></select><button className="button primary nest-button" disabled={!parts.length || isImporting || isWorking || (primaryNestAction === "current" && activePlate?.locked)} onClick={runPrimaryNest}><span>Nest project</span><b>→</b></button></div>
         <div className="mode-switch" role="group" aria-label="Interface detail"><button className={uiMode === "simple" ? "active" : ""} onClick={() => setUiMode("simple")}>Essentials</button><button className={uiMode === "advanced" ? "active" : ""} onClick={() => setUiMode("advanced")}>More options</button></div>
         <div className="control-group search-presets"><div className="label-with-help"><label>Search quality</label><HelpTip label="search quality">Every repeated shape is evaluated as a compact two-part motif. The motif may interlock or sit side-by-side, whichever leaves the smaller legal envelope. Higher quality checks more rotations and motif candidates.</HelpTip></div><div>{(["quick", "balanced", "best"] as SearchPreset[]).map((preset) => <button key={preset} className={searchPreset === preset ? "active" : ""} onClick={() => applySearchPreset(preset)}>{preset === "best" ? "Best fit" : preset[0].toUpperCase() + preset.slice(1)}</button>)}</div><p className="field-note">Estimated search time: {estimateLabel}. Parallel passes use available processor cores.</p></div>
@@ -739,9 +762,11 @@ export default function Home() {
 
     {orientingPart && <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="orientation-title"><section className="orientation-modal">
       <header><div><span className="eyebrow">PART ORIENTATION · PREVIEW</span><h2 id="orientation-title">{orientingPart.name}</h2></div><button className="modal-close" aria-label="Cancel orientation" onClick={closeOrientation}>×</button></header>
-      <div className="orientation-body"><div className="viewer-panel"><OrientationViewer meshes={orientingPart.nestingMeshes ?? orientingPart.meshes} orientation={orientingPart.orientation} onFaceSelected={laySelectedFace} /><div className="viewer-hint"><span>1</span> Click a flat face to place it on the bed · drag to orbit · scroll to zoom</div></div>
-        <aside className="orientation-controls"><span className="eyebrow">ORCA-STYLE WORKFLOW</span><h3>Choose the print face</h3><p>Click any flat model face, compare recommended print orientations, or make exact rotations. The automatic search runs in the background and balances bed contact, overhangs, low-angle faces, and height.</p>
-          <button className="button primary auto-orient" disabled={isWorking} onClick={autoOrientCurrent}>Recommended: auto orient</button>
+      <div className="orientation-body"><div className="viewer-panel"><OrientationViewer meshes={orientingPart.nestingMeshes ?? orientingPart.meshes} orientation={orientingPart.orientation} selectedFaceNormal={selectedFaceNormal} onFaceSelected={setSelectedFaceNormal} /><div className="viewer-plate-label">BUILD PLATE GRID</div><div className="viewer-hint"><span>{selectedFaceNormal ? "2" : "1"}</span>{selectedFaceNormal ? " Face selected — use Place selected face down to rest it on the grid." : " Click a model face to select it · drag to orbit · scroll to zoom"}</div></div>
+        <aside className="orientation-controls"><span className="eyebrow">ORIENTATION WORKFLOW</span><h3>Choose what rests on the plate</h3><p>The grid is the build plate. First select a face; then explicitly place that face down. This preview changes nesting only—your original model stays intact for 3MF export.</p>
+          <button className="button primary lay-face" disabled={isWorking || !selectedFaceNormal} onClick={laySelectedFace}>{selectedFaceNormal ? "Place selected face down" : "1. Select a face in the preview"}</button>
+          <button className="button secondary auto-orient" disabled={isWorking} onClick={autoOrientCurrent}>Or find a recommended orientation</button>
+          <div className="mesh-detail-control"><div><label htmlFor="nesting-mesh-detail">Nesting mesh detail</label><strong>{orientationTriangleBudget.toLocaleString()} triangles / mesh</strong></div><input id="nesting-mesh-detail" type="range" min="2000" max="30000" step="1000" value={orientationTriangleBudget} onChange={(event) => setOrientationMeshDetail(Number(event.target.value))} /><div className="slider-labels"><span>Coarse · faster</span><span>Fine · closer outline</span></div><p>Used for the nesting outline and this preview. The full imported mesh is preserved for export.</p></div>
           <div className="manual-rotation"><label>Exact rotation</label><div className="rotation-inputs">{(["x", "y", "z"] as const).map((axis) => <span key={axis}><small>{axis.toUpperCase()}</small><input aria-label={`${axis.toUpperCase()} rotation`} type="number" step="1" value={currentEuler(axis)} disabled={isWorking} onChange={(e) => setEuler(axis, Number(e.target.value))} /><i>°</i></span>)}</div><div className="orientation-presets six"><button disabled={isWorking} onClick={() => setEuler("x", currentEuler("x") - 90)}>X −90°</button><button disabled={isWorking} onClick={() => setEuler("x", currentEuler("x") + 90)}>X +90°</button><button disabled={isWorking} onClick={() => setEuler("y", currentEuler("y") - 90)}>Y −90°</button><button disabled={isWorking} onClick={() => setEuler("y", currentEuler("y") + 90)}>Y +90°</button><button disabled={isWorking} onClick={() => setEuler("z", currentEuler("z") - 90)}>Z −90°</button><button disabled={isWorking} onClick={() => setEuler("z", currentEuler("z") + 90)}>Z +90°</button></div><button className="orientation-reset" disabled={isWorking} onClick={() => orientPart(orientingPart.id, IDENTITY, `Reset ${orientingPart.name} orientation preview.`)}>Reset to imported orientation</button></div>
           <dl className="oriented-size"><div><dt>Footprint</dt><dd>{bounds(orientingPart.footprint).maxX.toFixed(1)} × {bounds(orientingPart.footprint).maxY.toFixed(1)} mm</dd></div><div><dt>Height</dt><dd className={orientingPart.height > bedHeight ? "danger" : ""}>{orientingPart.height.toFixed(1)} / {bedHeight} mm</dd></div></dl>
           <a className="orca-credit" href="https://github.com/OrcaSlicer/OrcaSlicer/wiki/prepare_object_manipulation#lay-on-face" target="_blank" rel="noreferrer">Face-alignment behavior follows OrcaSlicer’s Lay on Face workflow ↗</a>
