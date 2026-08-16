@@ -1,6 +1,8 @@
 import type { ModelMesh } from "./orientation-viewer";
 
-export const NESTING_TRIANGLE_BUDGET = 6_000;
+// This is deliberately a fixed, very coarse proxy. It is used only for the
+// silhouette, face picking, and nesting workers—never for the printable 3MF.
+export const NESTING_TRIANGLE_BUDGET = 1_500;
 
 export function meshTriangleCount(mesh: ModelMesh) {
   return Math.floor((mesh.indices.length || mesh.positions.length / 3) / 3);

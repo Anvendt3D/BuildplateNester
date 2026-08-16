@@ -142,7 +142,7 @@ export default function Home() {
   const [searchPreset, setSearchPreset] = useState<SearchPreset>("balanced"), [uiMode, setUiMode] = useState<"simple" | "advanced">("simple"), [primaryNestAction, setPrimaryNestAction] = useState<"smart" | "current" | "all" | "add">("smart");
   const [objective, setObjective] = useState<OptimizationObjective>("balanced"), [layoutOptions, setLayoutOptions] = useState<LayoutOption[]>([]), [history, setHistory] = useState<LayoutSnapshot[]>([]);
   const [storageReady, setStorageReady] = useState(false), [saveStatus, setSaveStatus] = useState<"saved" | "saving" | "error">("saved");
-  const [isImporting, setIsImporting] = useState(false), [message, setMessage] = useState("Add STEP files or load the example set."), [orientingId, setOrientingId] = useState<string | null>(null), [orientationDraft, setOrientationDraft] = useState<Part | null>(null), [selectedFaceNormal, setSelectedFaceNormal] = useState<[number, number, number] | null>(null), [orientationTriangleBudget, setOrientationTriangleBudget] = useState(6_000);
+  const [isImporting, setIsImporting] = useState(false), [message, setMessage] = useState("Add STEP files or load the example set."), [orientingId, setOrientingId] = useState<string | null>(null), [orientationDraft, setOrientationDraft] = useState<Part | null>(null), [selectedFaceNormal, setSelectedFaceNormal] = useState<[number, number, number] | null>(null);
   const [preferredSlicer, setPreferredSlicer] = useState<SlicerTarget>("orca"), [selectedPartId, setSelectedPartId] = useState<string | null>(null), [selectedPlacementId, setSelectedPlacementId] = useState<string | null>(null), [selectedPlacementIds, setSelectedPlacementIds] = useState<string[]>([]), [manualRotationStep, setManualRotationStep] = useState(15), [showUnplaced, setShowUnplaced] = useState(false);
   const [maxPlates, setMaxPlates] = useState(10), [keepSetsTogether, setKeepSetsTogether] = useState(false), [batchSets, setBatchSets] = useState(1), [fillMode, setFillMode] = useState<"remaining" | "repack" | "existing" | "batch">("remaining");
   const [workingLabel, setWorkingLabel] = useState<string | null>(null);
@@ -176,7 +176,7 @@ export default function Home() {
     let active = true;
     loadLocalProject<StoredProject>().then((project) => {
       if (!active || !project?.parts?.length) return;
-      const restoredParts = project.parts.map((part) => ({ ...part, nestingMeshes: part.nestingMeshes ?? part.meshes.map((mesh) => coarsenMeshForNesting(mesh)), priority: part.priority ?? 1, minQuantity: Math.min(part.quantity, part.minQuantity ?? 0) }));
+      const restoredParts = project.parts.map((part) => ({ ...part, nestingMeshes: part.meshes.map((mesh) => coarsenMeshForNesting(mesh)), priority: part.priority ?? 1, minQuantity: Math.min(part.quantity, part.minQuantity ?? 0) }));
       const restoredPlates = project.plates?.length ? project.plates : [{ id: "plate-1", name: "Plate 1", locked: false }];
       const restoredActive = restoredPlates.some((plate) => plate.id === project.activePlateId) ? project.activePlateId! : restoredPlates[0].id;
       const restoredWidth = project.bedWidth ?? 256, restoredDepth = project.bedDepth ?? 256, restoredClearance = project.clearance ?? 2;
@@ -344,7 +344,7 @@ export default function Home() {
 
   function openOrientation(id: string) {
     const source = parts.find((part) => part.id === id); if (!source?.meshes.length) return;
-    setOrientingId(id); setOrientationDraft(source); setSelectedFaceNormal(null); setOrientationTriangleBudget(Math.max(2_000, Math.min(30_000, Math.max(...(source.nestingMeshes ?? source.meshes).map(meshTriangleCount))))); setSelectedPartId(id); setSelectedPlacementId(null);
+    setOrientingId(id); setOrientationDraft(source); setSelectedFaceNormal(null); setSelectedPartId(id); setSelectedPlacementId(null);
   }
   function closeOrientation() { setOrientingId(null); setOrientationDraft(null); setSelectedFaceNormal(null); }
   function applyOrientation() {
@@ -593,12 +593,6 @@ export default function Home() {
     const delta = quaternionFromUnitVectors(normalize3(vec3(...normal)), vec3(0, 0, -1));
     setSelectedFaceNormal(null); orientPart(orientingPart.id, multiplyQuaternion(delta, orientingPart.orientation), `Placed the selected face of ${orientingPart.name} on the build plate.`);
   }
-  function setOrientationMeshDetail(triangleBudget: number) {
-    if (!orientingPart) return;
-    const safe = Math.round(Math.max(2_000, Math.min(30_000, triangleBudget)) / 1_000) * 1_000;
-    setOrientationTriangleBudget(safe); setSelectedFaceNormal(null);
-    setOrientationDraft(updateGeometry({ ...orientingPart, nestingMeshes: orientingPart.meshes.map((mesh) => coarsenMeshForNesting(mesh, safe)) }, orientingPart.orientation));
-  }
   function setEuler(axis: "x" | "y" | "z", value: number) {
     if (!orientingPart) return; const euler = eulerFromQuaternion(orientingPart.orientation); euler[axis] = value * Math.PI / 180;
     orientPart(orientingPart.id, quaternionFromEuler(euler.x, euler.y, euler.z), `Applied manual orientation to ${orientingPart.name}.`);
@@ -766,7 +760,7 @@ export default function Home() {
         <aside className="orientation-controls"><span className="eyebrow">ORIENTATION WORKFLOW</span><h3>Choose what rests on the plate</h3><p>The grid is the build plate. First select a face; then explicitly place that face down. This preview changes nesting only—your original model stays intact for 3MF export.</p>
           <button className="button primary lay-face" disabled={isWorking || !selectedFaceNormal} onClick={laySelectedFace}>{selectedFaceNormal ? "Place selected face down" : "1. Select a face in the preview"}</button>
           <button className="button secondary auto-orient" disabled={isWorking} onClick={autoOrientCurrent}>Or find a recommended orientation</button>
-          <div className="mesh-detail-control"><div><label htmlFor="nesting-mesh-detail">Nesting mesh detail</label><strong>{orientationTriangleBudget.toLocaleString()} triangles / mesh</strong></div><input id="nesting-mesh-detail" type="range" min="2000" max="30000" step="1000" value={orientationTriangleBudget} onChange={(event) => setOrientationMeshDetail(Number(event.target.value))} /><div className="slider-labels"><span>Coarse · faster</span><span>Fine · closer outline</span></div><p>Used for the nesting outline and this preview. The full imported mesh is preserved for export.</p></div>
+          <div className="mesh-detail-note"><strong>Nesting uses a fixed coarse proxy</strong><p>PrintNest limits the preview and nesting mesh to 1,500 triangles per imported mesh for speed. It never changes the original mesh used for 3MF export.</p></div>
           <div className="manual-rotation"><label>Exact rotation</label><div className="rotation-inputs">{(["x", "y", "z"] as const).map((axis) => <span key={axis}><small>{axis.toUpperCase()}</small><input aria-label={`${axis.toUpperCase()} rotation`} type="number" step="1" value={currentEuler(axis)} disabled={isWorking} onChange={(e) => setEuler(axis, Number(e.target.value))} /><i>°</i></span>)}</div><div className="orientation-presets six"><button disabled={isWorking} onClick={() => setEuler("x", currentEuler("x") - 90)}>X −90°</button><button disabled={isWorking} onClick={() => setEuler("x", currentEuler("x") + 90)}>X +90°</button><button disabled={isWorking} onClick={() => setEuler("y", currentEuler("y") - 90)}>Y −90°</button><button disabled={isWorking} onClick={() => setEuler("y", currentEuler("y") + 90)}>Y +90°</button><button disabled={isWorking} onClick={() => setEuler("z", currentEuler("z") - 90)}>Z −90°</button><button disabled={isWorking} onClick={() => setEuler("z", currentEuler("z") + 90)}>Z +90°</button></div><button className="orientation-reset" disabled={isWorking} onClick={() => orientPart(orientingPart.id, IDENTITY, `Reset ${orientingPart.name} orientation preview.`)}>Reset to imported orientation</button></div>
           <dl className="oriented-size"><div><dt>Footprint</dt><dd>{bounds(orientingPart.footprint).maxX.toFixed(1)} × {bounds(orientingPart.footprint).maxY.toFixed(1)} mm</dd></div><div><dt>Height</dt><dd className={orientingPart.height > bedHeight ? "danger" : ""}>{orientingPart.height.toFixed(1)} / {bedHeight} mm</dd></div></dl>
           <a className="orca-credit" href="https://github.com/OrcaSlicer/OrcaSlicer/wiki/prepare_object_manipulation#lay-on-face" target="_blank" rel="noreferrer">Face-alignment behavior follows OrcaSlicer’s Lay on Face workflow ↗</a>
