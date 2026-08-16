@@ -569,5 +569,21 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 .viewer-plate-label { position: absolute; top: 16px; left: 16px; padding: 5px 7px; border: 1px solid rgba(155, 141, 255, .55); background: rgba(20, 20, 28, .88); color: #b9afff; font: 700 9px var(--font-geist-mono), monospace; letter-spacing: .08em; pointer-events: none; }
 .multi-plate-overview { margin: 0 0 10px; padding: 10px; border: 1px solid var(--line); background: #17171e; }.multi-plate-overview > div:first-child { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 8px; }.multi-plate-overview strong { color: var(--ink); font-size: 11px; }.multi-plate-overview > div:first-child span { color: var(--muted); font-size: 9px; }.multi-plate-overview-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }.multi-plate-overview-grid button { display: grid; grid-template-columns: 62px minmax(0, 1fr); gap: 7px; align-items: center; min-height: 72px; padding: 6px; border: 1px solid #3b3b48; background: #202028; color: var(--ink); cursor: pointer; text-align: left; }.multi-plate-overview-grid button.active { border-color: var(--accent); box-shadow: inset 0 -2px var(--accent); }.multi-plate-overview-grid svg { width: 62px; height: 58px; background: #111116; border: 1px solid #4a4a57; }.multi-plate-overview-grid svg rect { fill: #16161d; }.multi-plate-overview-grid svg path { fill: var(--accent); opacity: .8; }.multi-plate-overview-grid span { display: grid; gap: 4px; min-width: 0; }.multi-plate-overview-grid b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }.multi-plate-overview-grid small { color: var(--muted); font: 9px var(--font-geist-mono), monospace; }
 
+/* Multi-plate workspace: every plate stays visible at working scale. */
+.plate-tabs, .multi-plate-overview { display: none; }
+.multi-plate-source { display: none; }
+.multi-plate-canvas { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); align-items: center; gap: clamp(24px, 3vw, 48px); overflow: auto; padding: 24px 28px 30px; }
+.multi-plate-card { width: min(100%, 680px); justify-self: center; padding: 0; border: 0; background: transparent; color: var(--ink); cursor: pointer; }
+.multi-plate-card > header { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: baseline; gap: 8px; margin: 0 0 8px; color: var(--muted); }
+.multi-plate-card > header > span { color: var(--accent-dark); font: 800 18px/1 var(--font-geist-mono), monospace; }
+.multi-plate-card > header strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; letter-spacing: .05em; }
+.multi-plate-card > header small { font: 10px var(--font-geist-mono), monospace; }
+.multi-plate-frame { position: relative; width: 100%; border: 1px solid #3b3b48; box-shadow: 0 12px 28px rgba(0, 0, 0, .24); transition: border-color .14s, box-shadow .14s; }
+.multi-plate-frame .build-plate { width: 100%; height: 100%; }
+.multi-plate-card:hover .multi-plate-frame { border-color: #747486; }
+.multi-plate-card.active .multi-plate-frame { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(124, 106, 255, .25), 0 12px 28px rgba(0, 0, 0, .28); }
+.multi-plate-card.active > header > span, .multi-plate-card.active > header strong { color: var(--accent-dark); }
+@media (max-width: 900px) { .multi-plate-canvas { grid-template-columns: minmax(320px, 1fr); padding-inline: 26px; } }
+
 @media (max-width: 1100px) { .workspace { grid-template-columns: 260px minmax(360px, 1fr) 330px; } }
 @media (max-width: 760px) { .topbar { height: 48px; flex-basis: 48px; }.topbar .github-link { display: none; }.privacy-note { display: none; }.workspace { display: flex; flex-direction: column; overflow: auto; }.sidebar, .plate-stage { width: 100%; min-height: auto; }.plate-stage { order: 1; }.left-sidebar { order: 0; }.controls-sidebar { order: 2; }.plate-stage { background: #111114; }.build-plate { max-height: none; } }
