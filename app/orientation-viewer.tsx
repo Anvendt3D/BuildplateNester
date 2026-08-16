@@ -32,7 +32,9 @@ export default function OrientationViewer({ meshes, orientation, selectedFaceNor
     if (!canvas || !parent || !meshes.length) return;
     const context = canvas.getContext("2d");
     if (!context) return;
-    let yaw = -0.7, pitch = 0.92, zoom = 1, dragDistance = 0;
+    // Start above the model, with the printable top face reading above the
+    // body and the bed plane below it—not as an upside-down underside view.
+    let yaw = -0.7, pitch = -0.92, zoom = 1, dragDistance = 0;
     let start = { x: 0, y: 0 }, prior = { x: 0, y: 0 }, dragging = false;
     let faces: DrawnFace[] = [];
 
@@ -55,8 +57,8 @@ export default function OrientationViewer({ meshes, orientation, selectedFaceNor
       const gridSize = Math.max(modelBox.size.x, modelBox.size.y, 20) * 1.8;
       const floor = [[-gridSize, -gridSize], [gridSize, -gridSize], [gridSize, gridSize], [-gridSize, gridSize]].map(([x, y]) => project(rotateVector(sub3(vec3(x, y, 0), modelCenter), viewQ)));
       context.beginPath(); context.moveTo(floor[0].x, floor[0].y); for (const point of floor.slice(1)) context.lineTo(point.x, point.y); context.closePath();
-      context.fillStyle = "#e3e8e4"; context.fill(); context.strokeStyle = "#aeb9b2"; context.lineWidth = 1.2; context.stroke();
-      context.strokeStyle = "#aeb9b2"; context.lineWidth = 1;
+      context.fillStyle = "#171a23"; context.fill(); context.strokeStyle = "#9b8dff"; context.lineWidth = 2; context.stroke();
+      context.strokeStyle = "rgba(155, 141, 255, .42)"; context.lineWidth = 1;
       for (let i = -5; i <= 5; i++) {
         for (const axis of [0, 1]) {
           const a = rotateVector(sub3(vec3(axis ? -gridSize : i * gridSize / 5, axis ? i * gridSize / 5 : -gridSize, 0), modelCenter), viewQ);
@@ -64,8 +66,8 @@ export default function OrientationViewer({ meshes, orientation, selectedFaceNor
           const pa = project(a), pb = project(b); context.beginPath(); context.moveTo(pa.x, pa.y); context.lineTo(pb.x, pb.y); context.stroke();
         }
       }
-      context.fillStyle = "#8f80ff"; context.font = "700 10px ui-monospace, monospace";
-      context.fillText("BUILD PLATE · selected face rests here", 16, height - 18);
+      context.fillStyle = "#c3bbff"; context.font = "700 11px ui-monospace, monospace";
+      context.fillText("BUILD PLATE TOP SURFACE · SELECTED FACE LANDS HERE", 18, height - 22);
 
       const triangles: Array<DrawnFace & { color: string; shade: number }> = [];
       let vertexOffset = 0;

@@ -27,7 +27,7 @@ test("PrintNest keeps controls legible, adjusts clearance by wheel, and fills a 
   await expect(page.getByRole("button", { name: /Fill plate with square/i })).toBeVisible();
   await page.getByRole("button", { name: /Orient square/i }).click();
   await expect(page.getByRole("heading", { name: "Choose what rests on the plate" })).toBeVisible();
-  await expect(page.getByText("BUILD PLATE GRID", { exact: true })).toBeVisible();
+  await expect(page.getByText("BUILD PLATE · TOP SURFACE", { exact: true })).toBeVisible();
   await expect(page.getByText(/fixed coarse proxy/i)).toBeVisible();
   await page.screenshot({ path: "test-results/printnest-orientation-workflow.png", fullPage: true });
   await page.getByRole("button", { name: "Cancel orientation" }).click();

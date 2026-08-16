@@ -179,7 +179,9 @@ export default function Home() {
     let active = true;
     loadLocalProject<StoredProject>().then((project) => {
       if (!active || !project?.parts?.length) return;
-      const restoredParts = project.parts.map((part) => ({ ...part, nestingMeshes: part.meshes.map((mesh) => coarsenMeshForNesting(mesh)), priority: part.priority ?? 1, minQuantity: Math.min(part.quantity, part.minQuantity ?? 0) }));
+      // Never restore an old, sparse proxy silhouette. Rebuild the visible and
+      // collision footprint from the complete imported model on every load.
+      const restoredParts = project.parts.map((part) => updateGeometry({ ...part, nestingMeshes: part.meshes.map((mesh) => coarsenMeshForNesting(mesh)), priority: part.priority ?? 1, minQuantity: Math.min(part.quantity, part.minQuantity ?? 0) }, part.orientation));
       const restoredPlates = project.plates?.length ? project.plates : [{ id: "plate-1", name: "Plate 1", locked: false }];
       const restoredActive = restoredPlates.some((plate) => plate.id === project.activePlateId) ? project.activePlateId! : restoredPlates[0].id;
       const restoredWidth = project.bedWidth ?? 256, restoredDepth = project.bedDepth ?? 256, restoredClearance = project.clearance ?? 2;
@@ -772,8 +774,8 @@ export default function Home() {
 
     {orientingPart && <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="orientation-title"><section className="orientation-modal">
       <header><div><span className="eyebrow">PART ORIENTATION · PREVIEW</span><h2 id="orientation-title">{orientingPart.name}</h2></div><button className="modal-close" aria-label="Cancel orientation" onClick={closeOrientation}>×</button></header>
-      <div className="orientation-body"><div className="viewer-panel"><OrientationViewer meshes={orientingPart.meshes} orientation={orientingPart.orientation} selectedFaceNormal={selectedFaceNormal} onFaceSelected={setSelectedFaceNormal} /><div className="viewer-plate-label">BUILD PLATE GRID</div><div className="viewer-hint"><span>{selectedFaceNormal ? "2" : "1"}</span>{selectedFaceNormal ? " Face selected — use Place selected face down to rest it on the grid." : " Click a model face to select it · drag to orbit · scroll to zoom"}</div></div>
-        <aside className="orientation-controls"><span className="eyebrow">ORIENTATION WORKFLOW</span><h3>Choose what rests on the plate</h3><p>The grid is the build plate. First select a face; then explicitly place that face down. This preview changes nesting only—your original model stays intact for 3MF export.</p>
+      <div className="orientation-body"><div className="viewer-panel"><OrientationViewer meshes={orientingPart.meshes} orientation={orientingPart.orientation} selectedFaceNormal={selectedFaceNormal} onFaceSelected={setSelectedFaceNormal} /><div className="viewer-plate-label">BUILD PLATE · TOP SURFACE</div><div className="viewer-hint"><span>{selectedFaceNormal ? "2" : "1"}</span>{selectedFaceNormal ? " Face selected — use Place selected face down to rest it on the build plate." : " Click a model face to select it · drag to orbit · scroll to zoom"}</div></div>
+        <aside className="orientation-controls"><span className="eyebrow">ORIENTATION WORKFLOW</span><h3>Choose what rests on the plate</h3><p>The dark plane is the top of the build plate. First select a face; then explicitly place that face down. This preview changes nesting only—your original model stays intact for 3MF export.</p>
           <button className="button primary lay-face" disabled={isWorking || !selectedFaceNormal} onClick={laySelectedFace}>{selectedFaceNormal ? "Place selected face down" : "1. Select a face in the preview"}</button>
           <button className="button secondary auto-orient" disabled={isWorking} onClick={autoOrientCurrent}>Or find a recommended orientation</button>
           <div className="mesh-detail-note"><strong>Nesting uses a fixed coarse proxy</strong><p>PrintNest limits the preview and nesting mesh to 1,500 triangles per imported mesh for speed. It never changes the original mesh used for 3MF export.</p></div>
