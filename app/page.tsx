@@ -265,15 +265,6 @@ export default function Home() {
       const fixedIds = new Set(fixed.map((placement) => placement.id));
       const requested = nextParts.map((part) => ({ ...part, copies: Array.from({ length: part.quantity }, (_, index) => index + 1).filter((copy) => !occupiedElsewhere.has(`${part.id}-${copy}`) && !fixedIds.has(`${part.id}-${copy}`)) }));
       const tooTall = requested.reduce((sum, part) => sum + (part.height > bedHeight ? part.copies.length : 0), 0), eligible = requested.filter((part) => part.height <= bedHeight && part.copies.length);
-      // Quick and Balanced deliberately share Fill's fast repeated-part path.
-      // The expensive rotational/interlocking search is reserved for Best fit.
-      if (searchPreset !== "best" && eligible.length === 1) {
-        const part = eligible[0], placed = fillRepeatedPartGrid({ part, copies: part.copies ?? [], width: bedWidth, depth: bedDepth, clearance, edgeMargin: EDGE_MARGIN, fixed });
-        const result = [...fixed, ...placed], totalUnplaced = (part.copies?.length ?? 0) - placed.length + tooTall;
-        setPlacements(result); setNestProgress({ placed: result.length, processed: placed.length, total: part.copies?.length ?? 0, candidateChecks: placed.length, attempt: 1, attempts: 1 }); setUnplacedCount(totalUnplaced);
-        setMessage(totalUnplaced ? `Quick nest placed ${result.length} parts; ${totalUnplaced} could not fit. Choose Best fit to search rotations and interlocks.` : `Nested ${result.length} repeated parts with the fast placement pass. Choose Best fit to search rotations and interlocks.`);
-        return;
-      }
       setNestProgress({ placed: fixed.length, processed: 0, total: eligible.reduce((sum, part) => sum + part.copies.length, 0), candidateChecks: 0, attempt: 1, attempts: 4 });
       const batch = await runInWorker(eligible, effort, fixed), result = batch.best, totalUnplaced = result.unplaced.length + tooTall;
       setPlacements(result.placed); setUnplacedCount(totalUnplaced); setLayoutOptions(batch.layouts);
@@ -554,15 +545,8 @@ export default function Home() {
         const requested = targetParts.map((part) => { const copies = pool.get(part.id) ?? []; return { ...part, quantity: copies.length, copies, minQuantity: keepSetsTogether && copies.length ? 1 : Math.min(part.minQuantity, copies.length) }; }).filter((part) => part.copies.length && part.height <= bedHeight);
         if (!requested.length) break;
         setNestProgress({ placed: fixed.length, processed: 0, total: requested.reduce((sum, part) => sum + part.copies.length, 0), candidateChecks: 0, attempt: 1, attempts: 1 });
-        let next: ProjectPlacement[], cancelled = false;
-        if (searchPreset !== "best" && requested.length === 1) {
-          const part = requested[0], fast = fillRepeatedPartGrid({ part, copies: part.copies ?? [], width: bedWidth, depth: bedDepth, clearance, edgeMargin: EDGE_MARGIN, fixed });
-          next = [...fixed, ...fast].map((placement) => ({ ...placement, plateId: plate.id } as ProjectPlacement));
-          setNestProgress({ placed: next.length, processed: fast.length, total: part.copies?.length ?? 0, candidateChecks: fast.length, attempt: 1, attempts: 1 });
-        } else {
-          const batch = await runInWorker(requested, rotationEffort, fixed, (progress) => { if (plate.id === activePlateId) setPlacements(progress); });
-          next = batch.best.placed.map((placement) => ({ ...placement, plateId: plate.id } as ProjectPlacement)); cancelled = batch.cancelled;
-        }
+        const batch = await runInWorker(requested, rotationEffort, fixed, (progress) => { if (plate.id === activePlateId) setPlacements(progress); });
+        const next = batch.best.placed.map((placement) => ({ ...placement, plateId: plate.id } as ProjectPlacement)), cancelled = batch.cancelled;
         working = [...working.filter((placement) => placement.plateId !== plate.id), ...next];
         const placedIds = new Set(next.map((placement) => placement.id));
         for (const [id, copies] of pool) pool.set(id, copies.filter((copy) => !placedIds.has(`${id}-${copy}`)));

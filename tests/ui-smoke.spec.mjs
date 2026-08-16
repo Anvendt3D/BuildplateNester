@@ -27,7 +27,7 @@ test("PrintNest keeps controls legible, adjusts clearance by wheel, and fills a 
   await expect(page.getByRole("button", { name: /Fill plate with square/i })).toBeVisible();
   await page.getByRole("spinbutton", { name: "Quantity for square.stl" }).fill("16");
   await page.getByRole("button", { name: "Nest project" }).click();
-  await expect(page.locator(".status-strip")).toContainText(/Nested 16 repeated parts with the fast placement pass/i);
+  await expect(page.locator(".status-strip")).toContainText(/Nested 16 parts/i);
   await expect(page.locator("svg.build-plate g.plate-part")).toHaveCount(16);
   await page.getByRole("button", { name: /Orient square/i }).click();
   await expect(page.getByRole("heading", { name: "Choose what rests on the plate" })).toBeVisible();
