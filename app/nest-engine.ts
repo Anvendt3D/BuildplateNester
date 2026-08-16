@@ -215,7 +215,13 @@ async function nestAttempt(request: NestRequest, attempt: number, noFit: NoFitMa
   const { parts, width, depth, clearance, autoRotate, nestingStart, outlinePrecision } = request;
   const edgeMargin = request.edgeMargin ?? 0;
   const instances = orderInstances(parts, attempt), tolerance = OUTLINE_TOLERANCES[outlinePrecision];
-  const rotationSchedule = !autoRotate ? [360] : request.preset === "quick" ? [90] : request.preset === "best" ? [90, 45, 15, 5] : [90, 45, 15];
+  const selectedStep = Math.max(1, request.rotationStep ?? (request.preset === "quick" ? 90 : request.preset === "best" ? 5 : 15));
+  // Honour the UI's rotation-effort setting. Presets decide how progressively
+  // the search expands; the selected step decides the final angular detail.
+  const rotationSchedule = !autoRotate ? [360]
+    : request.preset === "quick" ? [selectedStep]
+      : request.preset === "best" ? [...new Set([90, 45, 15, selectedStep])].sort((a, b) => b - a)
+        : [...new Set([90, 45, selectedStep])].sort((a, b) => b - a);
   const deadline = request.maxRuntimeMs ? Date.now() + request.maxRuntimeMs : Infinity;
   const placed: InternalPlacement[] = [], unplaced: UnplacedItem[] = [], blockedPartIds = new Set<string>();
   const spatial = new SpatialHash(Math.max(24, clearance * 4)), fineStep = instances.length > 30 ? 4 : 2, coarseStep = Math.max(8, fineStep * 3);
@@ -265,14 +271,15 @@ async function nestAttempt(request: NestRequest, attempt: number, noFit: NoFitMa
     return legal;
   };
 
+  let clusterBounds: Bounds | null = placed.length ? placed.reduce<Bounds>((current, entry) => ({ minX: Math.min(current.minX, entry.bounds.minX), minY: Math.min(current.minY, entry.bounds.minY), maxX: Math.max(current.maxX, entry.bounds.maxX), maxY: Math.max(current.maxY, entry.bounds.maxY) }), { ...placed[0].bounds }) : null;
   // Rank a legal placement by the space the complete cluster would occupy.
   // This is deliberately based on the real polygon placement, not the part's
   // standalone bounding box: concave interlocks can therefore beat a valid but
   // wasteful side-by-side position.
   const clusterScore = (candidates: InternalPlacement[]) => {
-    const cluster = [...placed.map((entry) => entry.bounds), ...candidates.map((entry) => entry.bounds)];
-    const minX = Math.min(...cluster.map((entry) => entry.minX)), minY = Math.min(...cluster.map((entry) => entry.minY));
-    const maxX = Math.max(...cluster.map((entry) => entry.maxX)), maxY = Math.max(...cluster.map((entry) => entry.maxY));
+    const candidateBounds = candidates.map((entry) => entry.bounds), seed = clusterBounds ?? candidateBounds[0];
+    const minX = Math.min(seed.minX, ...candidateBounds.map((entry) => entry.minX)), minY = Math.min(seed.minY, ...candidateBounds.map((entry) => entry.minY));
+    const maxX = Math.max(seed.maxX, ...candidateBounds.map((entry) => entry.maxX)), maxY = Math.max(seed.maxY, ...candidateBounds.map((entry) => entry.maxY));
     const occupiedArea = (maxX - minX) * (maxY - minY), occupiedPerimeter = (maxX - minX) + (maxY - minY);
     const centerDistance = Math.hypot((minX + maxX) / 2 - width / 2, (minY + maxY) / 2 - depth / 2);
     const startBias = nestingStart === "center" ? centerDistance : minY * (width + 1) + minX;
@@ -281,6 +288,7 @@ async function nestAttempt(request: NestRequest, attempt: number, noFit: NoFitMa
   const placementScore = (candidate: InternalPlacement) => clusterScore([candidate]);
   const insertPlacement = (entry: InternalPlacement) => {
     const index = placed.length; placed.push(entry);
+    clusterBounds = clusterBounds ? { minX: Math.min(clusterBounds.minX, entry.bounds.minX), minY: Math.min(clusterBounds.minY, entry.bounds.minY), maxX: Math.max(clusterBounds.maxX, entry.bounds.maxX), maxY: Math.max(clusterBounds.maxY, entry.bounds.maxY) } : { ...entry.bounds };
     spatial.insert({ minX: entry.bounds.minX - clearance, minY: entry.bounds.minY - clearance, maxX: entry.bounds.maxX + clearance, maxY: entry.bounds.maxY + clearance }, index);
   };
 

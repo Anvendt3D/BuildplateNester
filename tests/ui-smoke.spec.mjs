@@ -39,6 +39,9 @@ test("PrintNest keeps controls legible, adjusts clearance by wheel, and fills a 
   await page.getByRole("button", { name: /Fill plate with square/i }).click();
   await expect(page.locator(".status-strip")).toContainText(/441 regular-grid copies/i);
   await expect(page.locator("svg.build-plate g.plate-part")).toHaveCount(441);
+  await page.getByRole("button", { name: "Add plate" }).click();
+  await expect(page.getByRole("region", { name: "Side-by-side plate overview" })).toBeVisible();
+  await expect(page.getByRole("img", { name: "Plate 1 overview" })).toBeVisible();
 
   await page.screenshot({ path: "test-results/printnest-full-bed-fill.png", fullPage: true });
 });
