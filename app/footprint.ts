@@ -81,7 +81,7 @@ export function silhouetteFromMeshes(meshes: ModelMesh[], orientation: Quaternio
   // overwhelm polygon clipping and trigger the old convex-hull fallback.
   for (const source of [upwardTriangles, allTriangles]) {
     if (!source.length) continue;
-    for (const precision of [0.00001, 0.0001, 0.001, 0.01, 0.05]) {
+    for (const precision of [0.2, 0.5, 1]) {
       try {
         const result = unionTriangles(source, precision);
         if (result.length) return result;
