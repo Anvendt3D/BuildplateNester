@@ -4,6 +4,7 @@ dist/
 .vinext/
 .wrangler/
 .sites-runtime/
+test-results/
 *.tsbuildinfo
 .pytest_cache/
 *.log
