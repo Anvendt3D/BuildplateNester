@@ -94,7 +94,7 @@ function numberXml(value: number) {
   return Object.is(rounded, -0) ? "0" : String(rounded);
 }
 
-function filesFor3mf(parts: ExportPart[], placements: Placement[]) {
+function filesFor3mf(parts: ExportPart[], placements: Placement[], bedDepth: number) {
   const partMap = new Map(parts.map((part) => [part.id, part]));
   if (placements.some((placement) => !partMap.get(placement.partId)?.meshes.length)) throw new Error("The example outlines do not contain exportable 3D meshes. Use imported STEP or STL parts for slicer handoff.");
   const objects: string[] = [], items: string[] = [];
@@ -119,9 +119,16 @@ function filesFor3mf(parts: ExportPart[], placements: Placement[]) {
       const indices = consistentlyOrientedIndices(mesh, part.name);
       for (const point of points) {
         const localX = point.x - minX, localY = point.y - minY;
-        vertices.push(`<vertex x="${numberXml(placement.x + localX * cosine - localY * sine - rotatedMinX)}" y="${numberXml(placement.y + localX * sine + localY * cosine - rotatedMinY)}" z="${numberXml(point.z - minZ)}"/>`);
+        const x = placement.x + localX * cosine - localY * sine - rotatedMinX;
+        const y = placement.y + localX * sine + localY * cosine - rotatedMinY;
+        // The planner's SVG plate uses Y down; 3MF uses a conventional physical
+        // Y-up build plane. Convert once here so an asymmetric part and its
+        // position match the plate preview in the slicer.
+        vertices.push(`<vertex x="${numberXml(x)}" y="${numberXml(bedDepth - y)}" z="${numberXml(point.z - minZ)}"/>`);
       }
-      for (let index = 0; index + 2 < indices.length; index += 3) triangles.push(`<triangle v1="${vertexOffset + indices[index]}" v2="${vertexOffset + indices[index + 1]}" v3="${vertexOffset + indices[index + 2]}"/>`);
+      // Reflecting Y changes handedness, so reverse the winding to retain the
+      // same outward-facing printable surface.
+      for (let index = 0; index + 2 < indices.length; index += 3) triangles.push(`<triangle v1="${vertexOffset + indices[index]}" v2="${vertexOffset + indices[index + 2]}" v3="${vertexOffset + indices[index + 1]}"/>`);
       vertexOffset += points.length;
     });
     const displayName = `${part.name} #${placement.copy}`;
@@ -139,16 +146,16 @@ function filesFor3mf(parts: ExportPart[], placements: Placement[]) {
   return files;
 }
 
-export function create3mf(parts: ExportPart[], placements: Placement[]) {
-  return new Blob([zipSync(filesFor3mf(parts, placements), { level: 6 })], { type: "model/3mf" });
+export function create3mf(parts: ExportPart[], placements: Placement[], bedDepth = 256) {
+  return new Blob([zipSync(filesFor3mf(parts, placements, bedDepth), { level: 6 })], { type: "model/3mf" });
 }
 
-export function createMultiPlate3mf(parts: ExportPart[], placements: Placement[], plates: ExportPlate[]) {
+export function createMultiPlate3mf(parts: ExportPart[], placements: Placement[], plates: ExportPlate[], bedDepth = 256) {
   const includedPlates = plates.filter((plate) => placements.some((placement) => (placement.plateId ?? plates[0]?.id) === plate.id));
   const includedPlacements = placements.filter((placement) => includedPlates.some((plate) => plate.id === (placement.plateId ?? includedPlates[0]?.id)));
   if (!includedPlates.length || !includedPlacements.length) throw new Error("No placed models are available to export.");
 
-  const files = filesFor3mf(parts, includedPlacements);
+  const files = filesFor3mf(parts, includedPlacements, bedDepth);
   const plateMembership = new Map<string, number>();
   includedPlacements.forEach((placement, index) => plateMembership.set(placement.id, index + 1));
   const plateXml = includedPlates.map((plate, index) => {

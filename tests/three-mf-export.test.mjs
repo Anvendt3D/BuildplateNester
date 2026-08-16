@@ -31,6 +31,21 @@ test("exports a portable standards-only 3MF for a single plate", async () => {
   assert.match(strFromU8(files["[Content_Types].xml"]), /<Override PartName="\/3D\/3dmodel\.model" ContentType="application\/vnd\.ms-package\.3dmanufacturing-3dmodel\+xml"\/>/);
 });
 
+test("converts the SVG Y-down nesting plane to the 3MF build plane without inside-out faces", async () => {
+  const blob = create3mf(parts, placements.slice(0, 1), 100), files = unzipSync(new Uint8Array(await blob.arrayBuffer()));
+  const model = strFromU8(files["3D/3dmodel.model"]);
+  // The first source point is at placement (10, 20).  In a 100 mm physical
+  // build plane it must become Y=80, matching the visual plate layout.
+  assert.match(model, /<vertex x="10" y="80" z="0"\/>/);
+  const vertices = [...model.matchAll(/<vertex x="([^"]+)" y="([^"]+)" z="([^"]+)"\/>/g)].map((match) => match.slice(1).map(Number));
+  const triangles = [...model.matchAll(/<triangle v1="(\d+)" v2="(\d+)" v3="(\d+)"\/>/g)].map((match) => match.slice(1).map(Number));
+  const signedVolume = triangles.reduce((sum, [a, b, c]) => {
+    const [pa, pb, pc] = [vertices[a], vertices[b], vertices[c]];
+    return sum + pa[0] * (pb[1] * pc[2] - pb[2] * pc[1]) - pa[1] * (pb[0] * pc[2] - pb[2] * pc[0]) + pa[2] * (pb[0] * pc[1] - pb[1] * pc[0]);
+  }, 0);
+  assert.ok(signedVolume > 0, "Y conversion must retain outward triangle winding");
+});
+
 test("stores multiple plates in one Bambu Studio / OrcaSlicer project 3MF", async () => {
   const project = createMultiPlate3mf(parts, placements, plates), files = unzipSync(new Uint8Array(await project.arrayBuffer()));
   assert.equal(project.type, "model/3mf");

@@ -1,118 +1,67 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { QuaternionTuple, Vec3, bounds3, cross3, dot3, normalize3, quaternionFromEuler, rotateVector, sub3, vec3 } from "./geometry3d";
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { QuaternionTuple } from "./geometry3d";
 
 export type ModelMesh = { positions: number[]; indices: number[]; color?: number[] };
-type DrawnFace = { points: Array<{ x: number; y: number }>; normal: Vec3; depth: number };
 
-function pointInPolygon(point: { x: number; y: number }, polygon: Array<{ x: number; y: number }>) {
-  let inside = false;
-  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-    const a = polygon[i], b = polygon[j];
-    if ((a.y > point.y) !== (b.y > point.y) && point.x < (b.x - a.x) * (point.y - a.y) / (b.y - a.y) + a.x) inside = !inside;
-  }
-  return inside;
-}
-
-export default function OrientationViewer({ meshes, orientation, selectedFaceNormal, onFaceSelected }: {
+export default function OrientationViewer({ meshes, orientation, onFaceSelected }: {
   meshes: ModelMesh[];
   orientation: QuaternionTuple;
-  selectedFaceNormal: [number, number, number] | null;
   onFaceSelected: (worldNormal: [number, number, number]) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const callbackRef = useRef(onFaceSelected);
-  const selectedNormalRef = useRef<[number, number, number] | null>(null);
   useEffect(() => { callbackRef.current = onFaceSelected; }, [onFaceSelected]);
-  useEffect(() => { selectedNormalRef.current = selectedFaceNormal; }, [selectedFaceNormal]);
 
   useEffect(() => {
     const canvas = canvasRef.current, parent = canvas?.parentElement;
     if (!canvas || !parent || !meshes.length) return;
-    const context = canvas.getContext("2d");
-    if (!context) return;
-    // Start above the model, with the printable top face reading above the
-    // body and the bed plane below it—not as an upside-down underside view.
-    let yaw = -0.7, pitch = -0.92, zoom = 1, dragDistance = 0;
-    let start = { x: 0, y: 0 }, prior = { x: 0, y: 0 }, dragging = false;
-    let faces: DrawnFace[] = [];
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); renderer.outputColorSpace = THREE.SRGBColorSpace; renderer.setClearColor(0x111114, 1);
+    const scene = new THREE.Scene(); scene.background = new THREE.Color(0x111114);
+    const ambient = new THREE.HemisphereLight(0xf1efff, 0x262638, 2.1); scene.add(ambient);
+    const key = new THREE.DirectionalLight(0xffffff, 2.2); key.position.set(1.4, -1.8, 2.6); scene.add(key);
+    const fill = new THREE.DirectionalLight(0x9b8dff, .8); fill.position.set(-1.6, 1.2, .6); scene.add(fill);
+    // Mirror the stlTexturizer ground treatment: only a grid beneath the model.
+    // A filled plane was competing with both the grid and the part's bottom face.
+    const grid = new THREE.GridHelper(200, 40, 0x555568, 0x2a2a35);
+    grid.rotation.x = Math.PI / 2;
+    (Array.isArray(grid.material) ? grid.material : [grid.material]).forEach((material) => { material.depthWrite = false; });
+    scene.add(grid);
+    const model = new THREE.Group(); model.quaternion.set(orientation[0], orientation[1], orientation[2], orientation[3]); scene.add(model);
+    const geometries: THREE.BufferGeometry[] = [], materials: THREE.Material[] = [];
+    for (const source of meshes) {
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute("position", new THREE.Float32BufferAttribute(source.positions, 3));
+      const vertexCount = source.positions.length / 3;
+      if (source.indices.length && source.indices.every((index) => Number.isInteger(index) && index >= 0 && index < vertexCount)) geometry.setIndex(source.indices);
+      geometry.computeVertexNormals(); geometry.computeBoundingSphere(); geometries.push(geometry);
+      const values = source.color?.length === 3 ? source.color : [255, 122, 26], color = Math.max(...values) <= 1 ? new THREE.Color(values[0], values[1], values[2]) : new THREE.Color(values[0] / 255, values[1] / 255, values[2] / 255);
+      const material = new THREE.MeshStandardMaterial({ color, roughness: .58, metalness: .04, flatShading: true, side: THREE.DoubleSide }); materials.push(material); model.add(new THREE.Mesh(geometry, material));
+    }
+    model.updateMatrixWorld(true); const rawBox = new THREE.Box3().setFromObject(model), size = rawBox.getSize(new THREE.Vector3());
+    const extent = Math.max(size.x, size.y, size.z, 1), groundGap = Math.max(.01, extent * .001);
+    model.position.set(-rawBox.getCenter(new THREE.Vector3()).x, -rawBox.getCenter(new THREE.Vector3()).y, -rawBox.min.z + groundGap); model.updateMatrixWorld(true);
+    const gridSize = Math.max(20, extent * 2.1); grid.scale.set(gridSize / 200, gridSize / 200, 1); grid.position.z = -groundGap;
+    // Orthographic Z-up view and a tight clipping range match stlTexturizer.
+    // The former 0.1–100000 perspective depth range made tiny ground offsets
+    // indistinguishable to the depth buffer while manipulating the model.
+    const camera = new THREE.OrthographicCamera(-extent, extent, extent, -extent, -extent * 20, extent * 20); camera.up.set(0, 0, 1);
+    camera.position.set(extent * 3.2, -extent * 3.7, extent * 2.8);
+    const controls = new OrbitControls(camera, renderer.domElement); controls.target.set(0, 0, Math.max(0, size.z * .28)); controls.enableDamping = true; controls.dampingFactor = .08; controls.screenSpacePanning = true; controls.minDistance = extent * .18; controls.maxDistance = extent * 12; controls.minPolarAngle = .04; controls.maxPolarAngle = Math.PI - .04; controls.mouseButtons.LEFT = THREE.MOUSE.ROTATE; controls.mouseButtons.MIDDLE = THREE.MOUSE.DOLLY; controls.mouseButtons.RIGHT = THREE.MOUSE.PAN; controls.update();
+    const raycaster = new THREE.Raycaster(), pointer = new THREE.Vector2(); let down = { x: 0, y: 0 }, moved = false, frame = 0;
+    const resize = () => { const width = Math.max(320, parent.clientWidth), height = Math.max(300, parent.clientHeight), halfHeight = extent * 1.18, halfWidth = halfHeight * width / height; renderer.setSize(width, height, false); camera.left = -halfWidth; camera.right = halfWidth; camera.top = halfHeight; camera.bottom = -halfHeight; camera.updateProjectionMatrix(); };
+    const pick = (event: PointerEvent) => { const rect = canvas.getBoundingClientRect(); pointer.set((event.clientX - rect.left) / rect.width * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1); raycaster.setFromCamera(pointer, camera); const hit = raycaster.intersectObjects(model.children, true)[0]; if (!hit?.face) return; const normal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize(); callbackRef.current([normal.x, normal.y, normal.z]); };
+    const onDown = (event: PointerEvent) => { down = { x: event.clientX, y: event.clientY }; moved = false; };
+    const onMove = (event: PointerEvent) => { if (Math.hypot(event.clientX - down.x, event.clientY - down.y) > 5) moved = true; };
+    const onUp = (event: PointerEvent) => { if (!moved && event.button === 0) pick(event); };
+    const render = () => { controls.update(); renderer.render(scene, camera); frame = requestAnimationFrame(render); };
+    const observer = new ResizeObserver(resize); observer.observe(parent); resize(); render(); canvas.addEventListener("pointerdown", onDown); canvas.addEventListener("pointermove", onMove); canvas.addEventListener("pointerup", onUp);
+    return () => { cancelAnimationFrame(frame); observer.disconnect(); canvas.removeEventListener("pointerdown", onDown); canvas.removeEventListener("pointermove", onMove); canvas.removeEventListener("pointerup", onUp); controls.dispose(); geometries.forEach((geometry) => geometry.dispose()); materials.forEach((material) => material.dispose()); renderer.dispose(); };
+  }, [meshes, orientation]);
 
-    const rawVertices: Vec3[] = [];
-    for (const mesh of meshes) for (let i = 0; i < mesh.positions.length; i += 3) rawVertices.push(rotateVector(vec3(mesh.positions[i], mesh.positions[i + 1], mesh.positions[i + 2]), orientation));
-    const modelBox = bounds3(rawVertices), modelCenter = { ...modelBox.center };
-    modelCenter.z = modelBox.min.z;
-
-    const draw = () => {
-      const ratio = Math.min(window.devicePixelRatio || 1, 2), width = Math.max(320, parent.clientWidth), height = Math.max(300, parent.clientHeight);
-      if (canvas.width !== Math.round(width * ratio) || canvas.height !== Math.round(height * ratio)) { canvas.width = Math.round(width * ratio); canvas.height = Math.round(height * ratio); canvas.style.width = `${width}px`; canvas.style.height = `${height}px`; }
-      context.setTransform(ratio, 0, 0, ratio, 0, 0); context.clearRect(0, 0, width, height); context.fillStyle = "#f0f3f0"; context.fillRect(0, 0, width, height);
-      const viewQ = quaternionFromEuler(pitch, 0, yaw);
-      const transformed = rawVertices.map((v) => rotateVector(sub3(v, modelCenter), viewQ));
-      const ext = bounds3(transformed), extSize = ext.size;
-      const scale = Math.min(width * 0.72 / Math.max(1, extSize.x), height * 0.7 / Math.max(1, extSize.y)) * zoom;
-      const center = ext.center;
-      const project = (v: Vec3) => ({ x: width / 2 + (v.x - center.x) * scale, y: height / 2 - (v.y - center.y) * scale });
-
-      const gridSize = Math.max(modelBox.size.x, modelBox.size.y, 20) * 1.8;
-      const floor = [[-gridSize, -gridSize], [gridSize, -gridSize], [gridSize, gridSize], [-gridSize, gridSize]].map(([x, y]) => project(rotateVector(sub3(vec3(x, y, 0), modelCenter), viewQ)));
-      context.beginPath(); context.moveTo(floor[0].x, floor[0].y); for (const point of floor.slice(1)) context.lineTo(point.x, point.y); context.closePath();
-      context.fillStyle = "#171a23"; context.fill(); context.strokeStyle = "#9b8dff"; context.lineWidth = 2; context.stroke();
-      context.strokeStyle = "rgba(155, 141, 255, .42)"; context.lineWidth = 1;
-      for (let i = -5; i <= 5; i++) {
-        for (const axis of [0, 1]) {
-          const a = rotateVector(sub3(vec3(axis ? -gridSize : i * gridSize / 5, axis ? i * gridSize / 5 : -gridSize, 0), modelCenter), viewQ);
-          const b = rotateVector(sub3(vec3(axis ? gridSize : i * gridSize / 5, axis ? i * gridSize / 5 : gridSize, 0), modelCenter), viewQ);
-          const pa = project(a), pb = project(b); context.beginPath(); context.moveTo(pa.x, pa.y); context.lineTo(pb.x, pb.y); context.stroke();
-        }
-      }
-      context.fillStyle = "#c3bbff"; context.font = "700 11px ui-monospace, monospace";
-      context.fillText("BUILD PLATE TOP SURFACE · SELECTED FACE LANDS HERE", 18, height - 22);
-
-      const triangles: Array<DrawnFace & { color: string; shade: number }> = [];
-      let vertexOffset = 0;
-      for (const mesh of meshes) {
-        const indices = mesh.indices.length ? mesh.indices : Array.from({ length: mesh.positions.length / 3 }, (_, i) => i);
-        const importedColor = mesh.color?.length === 3 ? mesh.color : null;
-        const sourceColor = importedColor && importedColor.some((channel) => channel > 0.08) ? importedColor : [255, 122, 26];
-        const base = Math.max(...sourceColor) <= 1 ? sourceColor.map((channel) => channel * 255) : sourceColor;
-        for (let i = 0; i < indices.length; i += 3) {
-          const localA = vec3(mesh.positions[indices[i] * 3], mesh.positions[indices[i] * 3 + 1], mesh.positions[indices[i] * 3 + 2]);
-          const localB = vec3(mesh.positions[indices[i + 1] * 3], mesh.positions[indices[i + 1] * 3 + 1], mesh.positions[indices[i + 1] * 3 + 2]);
-          const localC = vec3(mesh.positions[indices[i + 2] * 3], mesh.positions[indices[i + 2] * 3 + 1], mesh.positions[indices[i + 2] * 3 + 2]);
-          const normal = rotateVector(normalize3(cross3(sub3(localB, localA), sub3(localC, localA))), orientation);
-          const a = transformed[vertexOffset + indices[i]], b = transformed[vertexOffset + indices[i + 1]], c = transformed[vertexOffset + indices[i + 2]];
-          // The preview camera looks down +Z in view space. Back-face culling
-          // avoids painting the underside over the visible surface, which made
-          // the grid look as if the model was being viewed from underneath.
-          if (rotateVector(normal, viewQ).z <= 0) continue;
-          const shade = 0.54 + Math.max(0, dot3(normal, normalize3(vec3(0.35, -0.55, 0.75)))) * 0.46;
-          triangles.push({ points: [project(a), project(b), project(c)], normal, depth: (a.z + b.z + c.z) / 3, color: `rgb(${base.map((channel) => Math.round(channel * shade)).join(",")})`, shade });
-        }
-        vertexOffset += mesh.positions.length / 3;
-      }
-      triangles.sort((a, b) => a.depth - b.depth); faces = triangles;
-      for (const face of triangles) {
-        context.beginPath(); context.moveTo(face.points[0].x, face.points[0].y); context.lineTo(face.points[1].x, face.points[1].y); context.lineTo(face.points[2].x, face.points[2].y); context.closePath();
-        const selected = selectedNormalRef.current && dot3(face.normal, vec3(...selectedNormalRef.current)) > .999;
-        context.fillStyle = selected ? "#9b8dff" : face.color; context.fill(); context.strokeStyle = selected ? "#ffffff" : "rgba(20,32,25,.16)"; context.lineWidth = selected ? 2 : .6; context.stroke();
-      }
-    };
-
-    const resizeObserver = new ResizeObserver(draw); resizeObserver.observe(parent); draw();
-    const pointerDown = (event: globalThis.PointerEvent) => { dragging = true; dragDistance = 0; start = prior = { x: event.clientX, y: event.clientY }; canvas.setPointerCapture(event.pointerId); };
-    const pointerMove = (event: globalThis.PointerEvent) => { if (!dragging) return; const dx = event.clientX - prior.x, dy = event.clientY - prior.y; dragDistance += Math.hypot(dx, dy); yaw += dx * 0.008; pitch = Math.max(-1.45, Math.min(1.45, pitch + dy * 0.008)); prior = { x: event.clientX, y: event.clientY }; draw(); };
-    const pointerUp = (event: globalThis.PointerEvent) => {
-      dragging = false;
-      if (dragDistance > 6 || Math.hypot(event.clientX - start.x, event.clientY - start.y) > 6) return;
-      const rect = canvas.getBoundingClientRect(), point = { x: event.clientX - rect.left, y: event.clientY - rect.top };
-      const face = [...faces].reverse().find((candidate) => pointInPolygon(point, candidate.points));
-      if (face) callbackRef.current([face.normal.x, face.normal.y, face.normal.z]);
-    };
-    const wheel = (event: WheelEvent) => { event.preventDefault(); zoom = Math.max(0.45, Math.min(3, zoom * (event.deltaY > 0 ? 0.9 : 1.1))); draw(); };
-    canvas.addEventListener("pointerdown", pointerDown); canvas.addEventListener("pointermove", pointerMove); canvas.addEventListener("pointerup", pointerUp); canvas.addEventListener("wheel", wheel, { passive: false });
-    return () => { resizeObserver.disconnect(); canvas.removeEventListener("pointerdown", pointerDown); canvas.removeEventListener("pointermove", pointerMove); canvas.removeEventListener("pointerup", pointerUp); canvas.removeEventListener("wheel", wheel); };
-  }, [meshes, orientation, selectedFaceNormal]);
-
-  return <div className="orientation-canvas"><canvas ref={canvasRef} aria-label="Interactive software-rendered 3D orientation preview" /></div>;
+  return <div className="orientation-canvas"><canvas ref={canvasRef} aria-label="Interactive 3D orientation preview: left-drag orbits, right-drag pans, scroll zooms, click a face to place it down" /></div>;
 }
