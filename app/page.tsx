@@ -4,7 +4,8 @@ import { ChangeEvent, DragEvent, PointerEvent, useEffect, useMemo, useRef, useSt
 import OrientationViewer, { ModelMesh } from "./orientation-viewer";
 import { QuaternionTuple, eulerFromQuaternion, multiplyQuaternion, normalize3, quaternionFromEuler, quaternionFromUnitVectors, rotateVector, vec3 } from "./geometry3d";
 import { Footprint, footprintArea, footprintBounds, footprintFromRing, footprintPath, footprintsOverlap, silhouetteFromMeshes, transformFootprint, translateFootprint } from "./footprint";
-import { LayoutOption, NestBatchResult, NestProgress, NestRequest, NestingStart, OptimizationObjective, OutlinePrecision, Placement, SearchPreset } from "./nest-engine";
+import { fillRepeatedPartGrid, LayoutOption, NestBatchResult, NestProgress, NestRequest, NestingStart, OptimizationObjective, OutlinePrecision, Placement, SearchPreset } from "./nest-engine";
+import { coarsenMeshForNesting, meshTriangleCount } from "./mesh-decimation";
 import { loadLocalProject, saveLocalProject } from "./project-storage";
 import { create3mf, createMultiPlate3mf } from "./three-mf";
 import { parseStl } from "./stl";
@@ -211,12 +212,13 @@ export default function Home() {
     while (workerPoolRef.current.length < attempts.length) workerPoolRef.current.push(new Worker(new URL("./nest.worker.ts", import.meta.url), { type: "module" }));
     const workers = workerPoolRef.current.slice(0, attempts.length); activeWorkersRef.current = workers;
     const progressByPass = new Map<number, NestProgress>(), completionSignatures = new Set<string>(); let bestProgress: Placement[] = fixed, finished = false;
+    livePreviewAtRef.current = 0;
     const jobs = attempts.map((attempt, index) => new Promise<NestBatchResult>((resolve, reject) => {
       const worker = workers[index], jobId = `${Date.now()}-${Math.random()}-${attempt}`;
       worker.onmessage = (event: MessageEvent<{ type: "progress"; progress: NestProgress; jobId?: string } | { type: "result"; result: NestBatchResult; jobId?: string } | { type: "error"; message: string; jobId?: string }>) => {
         if (event.data.jobId !== jobId) return;
         if (event.data.type === "progress") {
-          progressByPass.set(attempt, event.data.progress); if (event.data.progress.placed.length >= bestProgress.length) { bestProgress = event.data.progress.placed; const now = performance.now(); if (onProgress || now - livePreviewAtRef.current > 90 || event.data.progress.processed === event.data.progress.total) { livePreviewAtRef.current = now; (onProgress ?? ((next) => setPlacements(next)))(bestProgress); } }
+          progressByPass.set(attempt, event.data.progress); if (event.data.progress.placed.length >= bestProgress.length) { bestProgress = event.data.progress.placed; const now = performance.now(); if (onProgress || now - livePreviewAtRef.current > 16 || event.data.progress.processed === event.data.progress.total) { livePreviewAtRef.current = now; (onProgress ?? ((next) => setPlacements(next)))(bestProgress); } }
           const progress = [...progressByPass.values()], processed = progress.reduce((sum, item) => sum + item.processed, 0), total = eligible.reduce((sum, part) => sum + (part.copies?.length ?? part.quantity), 0) * attempts.length;
           setNestProgress({ placed: bestProgress.length, processed, total, candidateChecks: progress.reduce((sum, item) => sum + item.candidateChecks, 0), attempt: progressByPass.size, attempts: attempts.length });
         }
@@ -285,13 +287,14 @@ export default function Home() {
     const safe = Math.max(0, Math.min(15, Number.isFinite(value) ? value : clearance));
     setClearance(safe); setClearanceDraft(safe.toFixed(1)); setAllPlacements((current) => markAllCollisions(current, plates, bedWidth, bedDepth, safe));
   }
+  function adjustClearanceByWheel(deltaY: number) { updateClearance(clearance + (deltaY < 0 ? .1 : -.1)); }
 
   async function importFiles(files: FileList | File[]) {
     const selected = Array.from(files).filter((file) => /\.(stp|step|stl)$/i.test(file.name));
     if (!selected.length) { setMessage("Choose one or more .stp, .step, or .stl files."); return; }
     setIsImporting(true); setWorkingLabel("Preparing the local STEP importer…"); setMessage("Preparing the local STEP importer…"); await waitForPaint();
     try {
-      const imported: Part[] = [];
+      const imported: Part[] = []; let sourceTriangles = 0, nestingTriangles = 0;
       for (const file of selected) {
         setWorkingLabel(`Reading ${file.name}…`); setMessage(`Reading ${file.name}…`); await waitForPaint();
         const buffer = await file.arrayBuffer(); let meshes: ModelMesh[], source: "STEP" | "STL";
@@ -302,11 +305,15 @@ export default function Home() {
           if (mesh.diagnostics && !mesh.diagnostics.ok) throw new Error(`${file.name} could not be made into a watertight printable mesh (${mesh.diagnostics.openEdges ?? 0} open and ${mesh.diagnostics.nonManifoldEdges ?? 0} non-manifold edges). Export a repaired mesh from CAD and import the STL instead.`);
           meshes = [mesh]; source = "STEP";
         }
+        sourceTriangles += meshes.reduce((sum, mesh) => sum + meshTriangleCount(mesh), 0);
+        meshes = meshes.map((mesh) => coarsenMeshForNesting(mesh));
+        nestingTriangles += meshes.reduce((sum, mesh) => sum + meshTriangleCount(mesh), 0);
         const base: Part = { id: `${file.name}-${file.size}-${file.lastModified}`, name: file.name, quantity: 1, priority: 1, minQuantity: 0, height: 0, footprint: [], color: COLORS[(parts.length + imported.length) % COLORS.length], source, meshes, orientation: IDENTITY };
         imported.push(updateGeometry(base, IDENTITY));
       }
       const next = [...parts, ...imported]; setParts(next); setAllPlacements((current) => stageInstances(next, current, activePlateId, bedWidth, bedDepth, clearance));
-      setMessage(`Loaded ${imported.length} model${imported.length === 1 ? "" : "s"}. Instances that fit are staged on ${activePlate?.name ?? "the active plate"}; overflow is visible as unassigned.`);
+      const meshNote = sourceTriangles > nestingTriangles ? ` Reduced mesh detail from ${sourceTriangles.toLocaleString()} to ${nestingTriangles.toLocaleString()} triangles for nesting.` : "";
+      setMessage(`Loaded ${imported.length} model${imported.length === 1 ? "" : "s"}. Instances that fit are staged on ${activePlate?.name ?? "the active plate"}; overflow is visible as unassigned.${meshNote}`);
     } catch (error) { setMessage(error instanceof Error ? error.message : "Model import failed."); }
     finally { setIsImporting(false); setWorkingLabel(null); if (fileInput.current) fileInput.current.value = ""; }
   }
@@ -395,6 +402,21 @@ export default function Home() {
         const existingIds = new Set(allPlacements.map((placement) => placement.id));
         let available = Array.from({ length: 500 }, (_, index) => index + 1).filter((copy) => !existingIds.has(`${partId}-${copy}`) && !occupiedElsewhere.has(`${partId}-${copy}`));
         let working: Placement[] = [...placements], stopped = false;
+        const gridPlacements = fillRepeatedPartGrid({ part: target, copies: available, width: bedWidth, depth: bedDepth, clearance, edgeMargin: EDGE_MARGIN, fixed: working });
+        if (gridPlacements.length) {
+          working = [...working, ...gridPlacements];
+          const addedGridIds = new Set(gridPlacements.map((placement) => placement.id));
+          available = available.filter((copy) => !addedGridIds.has(`${partId}-${copy}`));
+          setPlacements(working);
+          setNestProgress({ placed: working.length, processed: gridPlacements.length, total: gridPlacements.length, candidateChecks: gridPlacements.length, attempt: 1, attempts: 1 });
+          await waitForPaint();
+          if (working.every((placement) => placement.partId === partId)) {
+            const fittedProject = allPlacements.filter((placement) => placement.plateId !== activePlateId && placement.partId === partId).length + working.filter((placement) => placement.partId === partId).length;
+            setParts((current) => current.map((part) => part.id === partId ? { ...part, quantity: Math.max(1, fittedProject), minQuantity: Math.min(part.minQuantity, Math.max(1, fittedProject)) } : part));
+            setMessage(`Filled ${activePlate?.name ?? "the active plate"} with ${working.length} regular-grid copies of ${target.name}.`);
+            return;
+          }
+        }
         let waveSize = 8;
         while (available.length && !localTaskCancelRef.current) {
           const wave = available.slice(0, waveSize), beforeIds = new Set(working.map((placement) => placement.id));
@@ -694,7 +716,7 @@ export default function Home() {
         <section className="workflow-steps" aria-label="PrintNest workflow"><div className={!parts.length ? "active" : "complete"}><b>1</b><span><strong>Import parts</strong><small>Drop STEP or STL files in the Parts panel.</small></span></div><div className={parts.length && !allPlacements.length ? "active" : allPlacements.length ? "complete" : ""}><b>2</b><span><strong>Set up & nest</strong><small>Choose the printer, clearance, then generate a layout.</small></span></div><div className={allPlacements.length ? "active" : ""}><b>3</b><span><strong>Export</strong><small>Download the ready-to-slice 3MF when the layout is final.</small></span></div></section>
         <div className="control-group"><div className="label-with-help"><label htmlFor="printer">Printer profile</label><HelpTip label="printer profile">Sets the nominal width, depth and height automatically. Choosing or editing a dimension switches to a custom build volume.</HelpTip></div><select id="printer" className="printer-select" value={printerId} onChange={(e) => applyPrinter(e.target.value)}><option value="custom">Custom build volume</option>{brands.map((brand) => <optgroup key={brand} label={brand}>{PRINTERS.filter((p) => p.brand === brand).map((p) => <option key={p.id} value={p.id}>{p.name} — {p.width}×{p.depth}×{p.height}</option>)}</optgroup>)}</select><p className="field-note">Nominal build volume; slicer exclusion zones may reduce usable area.</p></div>
         {uiMode === "advanced" && <div className="control-group"><div className="label-with-help"><label>Build volume</label><HelpTip label="build volume">W and D are the nominal machine dimensions. PrintNest reserves 2 mm on every edge, reducing usable width and depth by 4 mm. H rejects over-height parts.</HelpTip></div><div className="three-inputs"><span><small>W</small><input aria-label="Build width" type="number" value={bedWidth} onChange={(e) => setCustomBed("width", Number(e.target.value))} /></span><span><small>D</small><input aria-label="Build depth" type="number" value={bedDepth} onChange={(e) => setCustomBed("depth", Number(e.target.value))} /></span><span><small>H</small><input aria-label="Build height" type="number" value={bedHeight} onChange={(e) => setCustomBed("height", Number(e.target.value))} /></span></div><p className="field-note">Usable nesting area: {bedWidth - EDGE_MARGIN * 2} × {bedDepth - EDGE_MARGIN * 2} mm after the fixed edge safety.</p></div>}
-        <div className="control-group clearance-control"><div className="label-with-help"><label htmlFor="clearance">Part clearance</label><HelpTip label="part clearance">Minimum edge-to-edge gap between models. Drag for quick adjustment or type an exact value. This is separate from the fixed 2 mm plate-edge safety.</HelpTip></div><div className="range-row"><input id="clearance" type="range" min="0" max="15" step="0.1" value={clearance} style={{ background: `linear-gradient(to right, var(--accent) ${clearance / 15 * 100}%, #3b3b48 ${clearance / 15 * 100}%)` }} onChange={(e) => updateClearance(Number(e.target.value))} /><label className="clearance-number"><input aria-label="Part clearance in millimetres" type="number" min="0" max="15" step="0.1" inputMode="decimal" value={clearanceDraft} onChange={(e) => setClearanceDraft(e.target.value)} onBlur={() => { if (!clearanceDraft.trim()) { setClearanceDraft(clearance.toFixed(1)); return; } const next = Number(clearanceDraft); if (Number.isFinite(next)) updateClearance(next); else setClearanceDraft(clearance.toFixed(1)); }} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} /><span>mm</span></label></div><div className="slider-labels"><span>0</span><span>15 mm</span></div></div>
+        <div className="control-group clearance-control"><div className="label-with-help"><label htmlFor="clearance">Part clearance</label><HelpTip label="part clearance">Minimum edge-to-edge gap between models. Drag for quick adjustment or type an exact value. This is separate from the fixed 2 mm plate-edge safety.</HelpTip></div><div className="range-row"><input id="clearance" type="range" min="0" max="15" step="0.1" value={clearance} style={{ background: `linear-gradient(to right, var(--accent) ${clearance / 15 * 100}%, #3b3b48 ${clearance / 15 * 100}%)` }} onWheel={(event) => { event.preventDefault(); adjustClearanceByWheel(event.deltaY); }} onChange={(e) => updateClearance(Number(e.target.value))} /><label className="clearance-number"><input aria-label="Part clearance in millimetres" type="number" min="0" max="15" step="0.1" inputMode="decimal" value={clearanceDraft} onWheel={(event) => { event.preventDefault(); adjustClearanceByWheel(event.deltaY); }} onChange={(e) => setClearanceDraft(e.target.value)} onBlur={() => { if (!clearanceDraft.trim()) { setClearanceDraft(clearance.toFixed(1)); return; } const next = Number(clearanceDraft); if (Number.isFinite(next)) updateClearance(next); else setClearanceDraft(clearance.toFixed(1)); }} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} /><span>mm</span></label></div><div className="slider-labels"><span>0</span><span>15 mm</span></div></div>
         <div className="primary-nest"><strong>Generate layout</strong><span>Arrange the imported parts on the active plate, or distribute them across plates.</span><select aria-label="Nest project action" value={primaryNestAction} onChange={(event) => setPrimaryNestAction(event.target.value as typeof primaryNestAction)}><option value="smart">Smart — choose automatically</option><option value="current">Current plate only</option><option value="all">All existing plates</option><option value="add">All plates + add overflow</option></select><button className="button primary nest-button" disabled={!parts.length || isImporting || isWorking || (primaryNestAction === "current" && activePlate?.locked)} onClick={runPrimaryNest}><span>Nest project</span><b>→</b></button></div>
         <div className="mode-switch" role="group" aria-label="Interface detail"><button className={uiMode === "simple" ? "active" : ""} onClick={() => setUiMode("simple")}>Essentials</button><button className={uiMode === "advanced" ? "active" : ""} onClick={() => setUiMode("advanced")}>More options</button></div>
         <div className="control-group search-presets"><div className="label-with-help"><label>Search quality</label><HelpTip label="search quality">Every repeated shape is evaluated as a compact two-part motif. The motif may interlock or sit side-by-side, whichever leaves the smaller legal envelope. Higher quality checks more rotations and motif candidates.</HelpTip></div><div>{(["quick", "balanced", "best"] as SearchPreset[]).map((preset) => <button key={preset} className={searchPreset === preset ? "active" : ""} onClick={() => applySearchPreset(preset)}>{preset === "best" ? "Best fit" : preset[0].toUpperCase() + preset.slice(1)}</button>)}</div><p className="field-note">Estimated search time: {estimateLabel}. Parallel passes use available processor cores.</p></div>

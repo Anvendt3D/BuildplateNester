@@ -16,6 +16,7 @@ export type NestResult = { placed: Placement[]; unplaced: UnplacedItem[]; cancel
 export type LayoutOption = NestResult & { id: string; label: string; score: number; utilization: number; envelopeUtilization: number; occupiedArea: number; travelDistance: number; groupedDistance: number; requiredPlaced: number };
 export type NestBatchResult = { best: LayoutOption; layouts: LayoutOption[]; cancelled: boolean; candidateChecks: number };
 export type NestProgress = { placed: Placement[]; processed: number; total: number; candidateChecks: number; attempt: number; attempts: number };
+export type GridFillRequest = { part: NestPart; copies: number[]; width: number; depth: number; clearance: number; edgeMargin?: number; fixed?: Placement[] };
 
 type Bounds = { minX: number; minY: number; maxX: number; maxY: number };
 type Variant = { rotation: number; searchFootprint: Footprint; exactFootprint: Footprint; bounds: Bounds; key: string };
@@ -31,6 +32,30 @@ function shiftedBounds(bounds: Bounds, x: number, y: number): Bounds {
 }
 function boundsMayOverlap(a: Bounds, b: Bounds, clearance: number) {
   return !(a.maxX + clearance <= b.minX || b.maxX + clearance <= a.minX || a.maxY + clearance <= b.minY || b.maxY + clearance <= a.minY);
+}
+
+// A regular grid is both exact and dramatically faster than a full heuristic
+// search for repeated parts. It provides a guaranteed baseline fill before the
+// more expensive search explores irregular gaps around existing placements.
+export function fillRepeatedPartGrid(request: GridFillRequest): Placement[] {
+  const { part, copies, width, depth, clearance } = request, edgeMargin = request.edgeMargin ?? 0;
+  const footprint = part.footprint, partBounds = footprintBounds(footprint);
+  const partWidth = partBounds.maxX - partBounds.minX, partDepth = partBounds.maxY - partBounds.minY;
+  if (partWidth <= 0 || partDepth <= 0) return [];
+  const stepX = partWidth + clearance, stepY = partDepth + clearance;
+  const occupied = (request.fixed ?? []).map((placement) => ({ placement, world: translateFootprint(placement.footprint, placement.x, placement.y), bounds: footprintBounds(translateFootprint(placement.footprint, placement.x, placement.y)) }));
+  const added: Placement[] = [];
+  let copyIndex = 0;
+  for (let y = edgeMargin - partBounds.minY; y + partBounds.maxY <= depth - edgeMargin + 1e-6 && copyIndex < copies.length; y += stepY) {
+    for (let x = edgeMargin - partBounds.minX; x + partBounds.maxX <= width - edgeMargin + 1e-6 && copyIndex < copies.length; x += stepX) {
+      const world = translateFootprint(footprint, x, y), candidateBounds = footprintBounds(world);
+      const blocked = occupied.some((other) => boundsMayOverlap(candidateBounds, other.bounds, clearance) && footprintsOverlap(world, other.world, clearance));
+      if (blocked) continue;
+      const placement: Placement = { id: `${part.id}-${copies[copyIndex]}`, partId: part.id, copy: copies[copyIndex], x, y, rotation: 0, footprint, colliding: false, nested: true };
+      added.push(placement); occupied.push({ placement, world, bounds: candidateBounds }); copyIndex++;
+    }
+  }
+  return added;
 }
 function footprintSignature(footprint: Footprint, precision: number) {
   const snap = (value: number) => Math.round(value / precision);

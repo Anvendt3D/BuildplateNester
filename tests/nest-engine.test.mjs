@@ -11,7 +11,7 @@ const temporary = mkdtempSync(join(tmpdir(), "printnest-engine-test-"));
 const bundle = join(temporary, "nest-engine.mjs");
 const source = fileURLToPath(new URL("../app/nest-engine.ts", import.meta.url));
 buildSync({ entryPoints: [source], bundle: true, platform: "node", format: "esm", outfile: bundle });
-const { nestParts } = await import(pathToFileURL(bundle).href);
+const { fillRepeatedPartGrid, nestParts } = await import(pathToFileURL(bundle).href);
 test.after(() => rmSync(temporary, { recursive: true, force: true }));
 
 test("fills beyond one pair for crescent-shaped repeated parts", async () => {
@@ -31,4 +31,12 @@ test("raster-guided search fills ten detailed concave outlines", async () => {
   assert.equal(result.best.placed.length, 10);
   assert.equal(result.best.unplaced.length, 0);
   assert.equal(result.cancelled, false);
+});
+
+test("grid fill uses the full bed for small repeated squares", () => {
+  const footprint = [[[
+    { x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 },
+  ]]];
+  const placed = fillRepeatedPartGrid({ part: { id: "square", quantity: 500, footprint, priority: 1, minQuantity: 0 }, copies: Array.from({ length: 500 }, (_, index) => index + 1), width: 256, depth: 256, clearance: 2, edgeMargin: 2 });
+  assert.equal(placed.length, 441);
 });
