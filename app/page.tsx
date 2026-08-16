@@ -118,7 +118,10 @@ function importStepFile(text: string): Promise<ModelMesh & { diagnostics?: { ok?
 }
 
 function updateGeometry(part: Part, orientation: QuaternionTuple): Part {
-  const workingMeshes = part.nestingMeshes ?? part.meshes;
+  // The visual plate outline must come from the complete watertight model. The
+  // coarse proxy is for background orientation analysis only and can contain
+  // sparse triangle coverage that is unsuitable for a visible silhouette.
+  const workingMeshes = part.meshes;
   if (!workingMeshes.length) return { ...part, orientation };
   let minZ = Infinity, maxZ = -Infinity;
   for (const mesh of workingMeshes) for (let i = 0; i < mesh.positions.length; i += 3) {
@@ -756,7 +759,7 @@ export default function Home() {
 
     {orientingPart && <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="orientation-title"><section className="orientation-modal">
       <header><div><span className="eyebrow">PART ORIENTATION · PREVIEW</span><h2 id="orientation-title">{orientingPart.name}</h2></div><button className="modal-close" aria-label="Cancel orientation" onClick={closeOrientation}>×</button></header>
-      <div className="orientation-body"><div className="viewer-panel"><OrientationViewer meshes={orientingPart.nestingMeshes ?? orientingPart.meshes} orientation={orientingPart.orientation} selectedFaceNormal={selectedFaceNormal} onFaceSelected={setSelectedFaceNormal} /><div className="viewer-plate-label">BUILD PLATE GRID</div><div className="viewer-hint"><span>{selectedFaceNormal ? "2" : "1"}</span>{selectedFaceNormal ? " Face selected — use Place selected face down to rest it on the grid." : " Click a model face to select it · drag to orbit · scroll to zoom"}</div></div>
+      <div className="orientation-body"><div className="viewer-panel"><OrientationViewer meshes={orientingPart.meshes} orientation={orientingPart.orientation} selectedFaceNormal={selectedFaceNormal} onFaceSelected={setSelectedFaceNormal} /><div className="viewer-plate-label">BUILD PLATE GRID</div><div className="viewer-hint"><span>{selectedFaceNormal ? "2" : "1"}</span>{selectedFaceNormal ? " Face selected — use Place selected face down to rest it on the grid." : " Click a model face to select it · drag to orbit · scroll to zoom"}</div></div>
         <aside className="orientation-controls"><span className="eyebrow">ORIENTATION WORKFLOW</span><h3>Choose what rests on the plate</h3><p>The grid is the build plate. First select a face; then explicitly place that face down. This preview changes nesting only—your original model stays intact for 3MF export.</p>
           <button className="button primary lay-face" disabled={isWorking || !selectedFaceNormal} onClick={laySelectedFace}>{selectedFaceNormal ? "Place selected face down" : "1. Select a face in the preview"}</button>
           <button className="button secondary auto-orient" disabled={isWorking} onClick={autoOrientCurrent}>Or find a recommended orientation</button>

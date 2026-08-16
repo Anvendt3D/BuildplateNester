@@ -52,8 +52,11 @@ export default function OrientationViewer({ meshes, orientation, selectedFaceNor
       const center = ext.center;
       const project = (v: Vec3) => ({ x: width / 2 + (v.x - center.x) * scale, y: height / 2 - (v.y - center.y) * scale });
 
-      context.strokeStyle = "#ccd3ce"; context.lineWidth = 1;
       const gridSize = Math.max(modelBox.size.x, modelBox.size.y, 20) * 1.8;
+      const floor = [[-gridSize, -gridSize], [gridSize, -gridSize], [gridSize, gridSize], [-gridSize, gridSize]].map(([x, y]) => project(rotateVector(sub3(vec3(x, y, 0), modelCenter), viewQ)));
+      context.beginPath(); context.moveTo(floor[0].x, floor[0].y); for (const point of floor.slice(1)) context.lineTo(point.x, point.y); context.closePath();
+      context.fillStyle = "#e3e8e4"; context.fill(); context.strokeStyle = "#aeb9b2"; context.lineWidth = 1.2; context.stroke();
+      context.strokeStyle = "#aeb9b2"; context.lineWidth = 1;
       for (let i = -5; i <= 5; i++) {
         for (const axis of [0, 1]) {
           const a = rotateVector(sub3(vec3(axis ? -gridSize : i * gridSize / 5, axis ? i * gridSize / 5 : -gridSize, 0), modelCenter), viewQ);
@@ -77,6 +80,10 @@ export default function OrientationViewer({ meshes, orientation, selectedFaceNor
           const localC = vec3(mesh.positions[indices[i + 2] * 3], mesh.positions[indices[i + 2] * 3 + 1], mesh.positions[indices[i + 2] * 3 + 2]);
           const normal = rotateVector(normalize3(cross3(sub3(localB, localA), sub3(localC, localA))), orientation);
           const a = transformed[vertexOffset + indices[i]], b = transformed[vertexOffset + indices[i + 1]], c = transformed[vertexOffset + indices[i + 2]];
+          // The preview camera looks down +Z in view space. Back-face culling
+          // avoids painting the underside over the visible surface, which made
+          // the grid look as if the model was being viewed from underneath.
+          if (rotateVector(normal, viewQ).z <= 0) continue;
           const shade = 0.54 + Math.max(0, dot3(normal, normalize3(vec3(0.35, -0.55, 0.75)))) * 0.46;
           triangles.push({ points: [project(a), project(b), project(c)], normal, depth: (a.z + b.z + c.z) / 3, color: `rgb(${base.map((channel) => Math.round(channel * shade)).join(",")})`, shade });
         }
