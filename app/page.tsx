@@ -220,7 +220,9 @@ export default function Home() {
 
   function runInWorker(eligible: Array<Part & { copies?: number[] }>, effort = rotationEffort, fixed: Placement[] = [], onProgress?: (placements: Placement[]) => void, options: { singlePass?: boolean; maxRuntimeMs?: number } = {}) {
     const attempts = options.singlePass ? [0] : searchPreset === "quick" ? [0] : searchPreset === "best" ? [0, 1, 2, 3] : [0, 1, 2];
-    const maxRuntimeMs = options.maxRuntimeMs ?? (searchPreset === "quick" ? 5_000 : searchPreset === "best" ? 45_000 : 18_000);
+    // Nesting runs until it finds a result or the user presses Stop. A wall
+    // clock deadline made larger/complex projects stop arbitrarily early.
+    const maxRuntimeMs = options.maxRuntimeMs;
     const request: NestRequest = { parts: eligible.map((part) => ({ id: part.id, quantity: part.copies?.length ?? part.quantity, copies: part.copies, footprint: part.footprint, priority: part.priority, minQuantity: Math.min(part.minQuantity, part.copies?.length ?? part.quantity) })), width: bedWidth, depth: bedDepth, clearance, edgeMargin: EDGE_MARGIN, fixed, autoRotate, rotationStep: ROTATION_EFFORTS[effort].step, nestingStart, outlinePrecision, objective, preset: searchPreset, attemptCount: attempts.length, maxRuntimeMs };
     while (workerPoolRef.current.length < attempts.length) workerPoolRef.current.push(new Worker(new URL("./nest.worker.ts", import.meta.url), { type: "module" }));
     const workers = workerPoolRef.current.slice(0, attempts.length); activeWorkersRef.current = workers;
@@ -263,6 +265,15 @@ export default function Home() {
       const fixedIds = new Set(fixed.map((placement) => placement.id));
       const requested = nextParts.map((part) => ({ ...part, copies: Array.from({ length: part.quantity }, (_, index) => index + 1).filter((copy) => !occupiedElsewhere.has(`${part.id}-${copy}`) && !fixedIds.has(`${part.id}-${copy}`)) }));
       const tooTall = requested.reduce((sum, part) => sum + (part.height > bedHeight ? part.copies.length : 0), 0), eligible = requested.filter((part) => part.height <= bedHeight && part.copies.length);
+      // Quick and Balanced deliberately share Fill's fast repeated-part path.
+      // The expensive rotational/interlocking search is reserved for Best fit.
+      if (searchPreset !== "best" && eligible.length === 1) {
+        const part = eligible[0], placed = fillRepeatedPartGrid({ part, copies: part.copies ?? [], width: bedWidth, depth: bedDepth, clearance, edgeMargin: EDGE_MARGIN, fixed });
+        const result = [...fixed, ...placed], totalUnplaced = (part.copies?.length ?? 0) - placed.length + tooTall;
+        setPlacements(result); setNestProgress({ placed: result.length, processed: placed.length, total: part.copies?.length ?? 0, candidateChecks: placed.length, attempt: 1, attempts: 1 }); setUnplacedCount(totalUnplaced);
+        setMessage(totalUnplaced ? `Quick nest placed ${result.length} parts; ${totalUnplaced} could not fit. Choose Best fit to search rotations and interlocks.` : `Nested ${result.length} repeated parts with the fast placement pass. Choose Best fit to search rotations and interlocks.`);
+        return;
+      }
       setNestProgress({ placed: fixed.length, processed: 0, total: eligible.reduce((sum, part) => sum + part.copies.length, 0), candidateChecks: 0, attempt: 1, attempts: 4 });
       const batch = await runInWorker(eligible, effort, fixed), result = batch.best, totalUnplaced = result.unplaced.length + tooTall;
       setPlacements(result.placed); setUnplacedCount(totalUnplaced); setLayoutOptions(batch.layouts);
@@ -288,6 +299,7 @@ export default function Home() {
     if (primaryNestAction === "current") { runNest(); return; }
     if (primaryNestAction === "all") { distributeAcrossPlates(parts, false, false); return; }
     if (primaryNestAction === "add") { distributeAcrossPlates(parts, true, false); return; }
+    if (parts.length === 1) { runNest(); return; }
     if (unplacedCount > 0 || plates.length > 1) distributeAcrossPlates(parts, true, false); else runNest();
   }
   function setCustomBed(axis: "width" | "depth" | "height", value: number) {
