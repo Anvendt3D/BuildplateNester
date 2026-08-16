@@ -12,7 +12,7 @@ import { parseStl } from "./stl";
 
 type Part = {
   id: string; name: string; quantity: number; height: number; footprint: Footprint;
-  color: string; source: "STEP" | "STL" | "DEMO"; meshes: ModelMesh[]; orientation: QuaternionTuple; priority: number; minQuantity: number;
+  color: string; source: "STEP" | "STL" | "DEMO"; meshes: ModelMesh[]; nestingMeshes?: ModelMesh[]; orientation: QuaternionTuple; priority: number; minQuantity: number;
 };
 type Plate = { id: string; name: string; locked: boolean };
 type ProjectPlacement = Placement & { plateId: string; locked?: boolean };
@@ -118,13 +118,14 @@ function importStepFile(text: string): Promise<ModelMesh & { diagnostics?: { ok?
 }
 
 function updateGeometry(part: Part, orientation: QuaternionTuple): Part {
-  if (!part.meshes.length) return { ...part, orientation };
+  const workingMeshes = part.nestingMeshes ?? part.meshes;
+  if (!workingMeshes.length) return { ...part, orientation };
   let minZ = Infinity, maxZ = -Infinity;
-  for (const mesh of part.meshes) for (let i = 0; i < mesh.positions.length; i += 3) {
+  for (const mesh of workingMeshes) for (let i = 0; i < mesh.positions.length; i += 3) {
     const vector = rotateVector(vec3(mesh.positions[i], mesh.positions[i + 1], mesh.positions[i + 2]), orientation);
     minZ = Math.min(minZ, vector.z); maxZ = Math.max(maxZ, vector.z);
   }
-  return { ...part, orientation, footprint: silhouetteFromMeshes(part.meshes, orientation), height: maxZ - minZ };
+  return { ...part, orientation, footprint: silhouetteFromMeshes(workingMeshes, orientation), height: maxZ - minZ };
 }
 
 const demoParts: Part[] = [
@@ -172,7 +173,7 @@ export default function Home() {
     let active = true;
     loadLocalProject<StoredProject>().then((project) => {
       if (!active || !project?.parts?.length) return;
-      const restoredParts = project.parts.map((part) => ({ ...part, priority: part.priority ?? 1, minQuantity: Math.min(part.quantity, part.minQuantity ?? 0) }));
+      const restoredParts = project.parts.map((part) => ({ ...part, nestingMeshes: part.nestingMeshes ?? part.meshes.map((mesh) => coarsenMeshForNesting(mesh)), priority: part.priority ?? 1, minQuantity: Math.min(part.quantity, part.minQuantity ?? 0) }));
       const restoredPlates = project.plates?.length ? project.plates : [{ id: "plate-1", name: "Plate 1", locked: false }];
       const restoredActive = restoredPlates.some((plate) => plate.id === project.activePlateId) ? project.activePlateId! : restoredPlates[0].id;
       const restoredWidth = project.bedWidth ?? 256, restoredDepth = project.bedDepth ?? 256, restoredClearance = project.clearance ?? 2;
@@ -284,7 +285,7 @@ export default function Home() {
     if (axis === "height") setBedHeight(safe);
   }
   function updateClearance(value: number) {
-    const safe = Math.max(0, Math.min(15, Number.isFinite(value) ? value : clearance));
+    const safe = Math.round(Math.max(0, Math.min(15, Number.isFinite(value) ? value : clearance)) * 10) / 10;
     setClearance(safe); setClearanceDraft(safe.toFixed(1)); setAllPlacements((current) => markAllCollisions(current, plates, bedWidth, bedDepth, safe));
   }
   function adjustClearanceByWheel(deltaY: number) { updateClearance(clearance + (deltaY < 0 ? .1 : -.1)); }
@@ -306,9 +307,9 @@ export default function Home() {
           meshes = [mesh]; source = "STEP";
         }
         sourceTriangles += meshes.reduce((sum, mesh) => sum + meshTriangleCount(mesh), 0);
-        meshes = meshes.map((mesh) => coarsenMeshForNesting(mesh));
-        nestingTriangles += meshes.reduce((sum, mesh) => sum + meshTriangleCount(mesh), 0);
-        const base: Part = { id: `${file.name}-${file.size}-${file.lastModified}`, name: file.name, quantity: 1, priority: 1, minQuantity: 0, height: 0, footprint: [], color: COLORS[(parts.length + imported.length) % COLORS.length], source, meshes, orientation: IDENTITY };
+        const nestingMeshes = meshes.map((mesh) => coarsenMeshForNesting(mesh));
+        nestingTriangles += nestingMeshes.reduce((sum, mesh) => sum + meshTriangleCount(mesh), 0);
+        const base: Part = { id: `${file.name}-${file.size}-${file.lastModified}`, name: file.name, quantity: 1, priority: 1, minQuantity: 0, height: 0, footprint: [], color: COLORS[(parts.length + imported.length) % COLORS.length], source, meshes, nestingMeshes, orientation: IDENTITY };
         imported.push(updateGeometry(base, IDENTITY));
       }
       const next = [...parts, ...imported]; setParts(next); setAllPlacements((current) => stageInstances(next, current, activePlateId, bedWidth, bedDepth, clearance));
@@ -353,7 +354,7 @@ export default function Home() {
         autoOrientRejectRef.current = reject;
         worker.onmessage = (event: MessageEvent<{ type: "result"; result: { orientation: QuaternionTuple; candidates: number; sampledTriangles: number; footprint: Footprint; height: number } } | { type: "error"; message: string }>) => event.data.type === "result" ? resolve(event.data.result) : reject(new Error(event.data.message));
         worker.onerror = (event) => reject(new Error(event.message || "Automatic orientation failed."));
-        worker.postMessage({ meshes: source.meshes });
+        worker.postMessage({ meshes: source.nestingMeshes ?? source.meshes });
       });
       setOrientationDraft({ ...source, orientation: result.orientation, footprint: result.footprint, height: result.height });
       setMessage(`Previewing the recommended print orientation for ${source.name}. Compared ${result.candidates} Orca-style candidates using ${result.sampledTriangles.toLocaleString()} sampled triangles.`);
@@ -738,7 +739,7 @@ export default function Home() {
 
     {orientingPart && <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="orientation-title"><section className="orientation-modal">
       <header><div><span className="eyebrow">PART ORIENTATION · PREVIEW</span><h2 id="orientation-title">{orientingPart.name}</h2></div><button className="modal-close" aria-label="Cancel orientation" onClick={closeOrientation}>×</button></header>
-      <div className="orientation-body"><div className="viewer-panel"><OrientationViewer meshes={orientingPart.meshes} orientation={orientingPart.orientation} onFaceSelected={laySelectedFace} /><div className="viewer-hint"><span>1</span> Click a flat face to place it on the bed · drag to orbit · scroll to zoom</div></div>
+      <div className="orientation-body"><div className="viewer-panel"><OrientationViewer meshes={orientingPart.nestingMeshes ?? orientingPart.meshes} orientation={orientingPart.orientation} onFaceSelected={laySelectedFace} /><div className="viewer-hint"><span>1</span> Click a flat face to place it on the bed · drag to orbit · scroll to zoom</div></div>
         <aside className="orientation-controls"><span className="eyebrow">ORCA-STYLE WORKFLOW</span><h3>Choose the print face</h3><p>Click any flat model face, compare recommended print orientations, or make exact rotations. The automatic search runs in the background and balances bed contact, overhangs, low-angle faces, and height.</p>
           <button className="button primary auto-orient" disabled={isWorking} onClick={autoOrientCurrent}>Recommended: auto orient</button>
           <div className="manual-rotation"><label>Exact rotation</label><div className="rotation-inputs">{(["x", "y", "z"] as const).map((axis) => <span key={axis}><small>{axis.toUpperCase()}</small><input aria-label={`${axis.toUpperCase()} rotation`} type="number" step="1" value={currentEuler(axis)} disabled={isWorking} onChange={(e) => setEuler(axis, Number(e.target.value))} /><i>°</i></span>)}</div><div className="orientation-presets six"><button disabled={isWorking} onClick={() => setEuler("x", currentEuler("x") - 90)}>X −90°</button><button disabled={isWorking} onClick={() => setEuler("x", currentEuler("x") + 90)}>X +90°</button><button disabled={isWorking} onClick={() => setEuler("y", currentEuler("y") - 90)}>Y −90°</button><button disabled={isWorking} onClick={() => setEuler("y", currentEuler("y") + 90)}>Y +90°</button><button disabled={isWorking} onClick={() => setEuler("z", currentEuler("z") - 90)}>Z −90°</button><button disabled={isWorking} onClick={() => setEuler("z", currentEuler("z") + 90)}>Z +90°</button></div><button className="orientation-reset" disabled={isWorking} onClick={() => orientPart(orientingPart.id, IDENTITY, `Reset ${orientingPart.name} orientation preview.`)}>Reset to imported orientation</button></div>
