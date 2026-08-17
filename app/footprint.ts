@@ -12,6 +12,11 @@ type PcMultiPolygon = PcPolygon[];
 type RawTriangle = [[number, number], [number, number], [number, number]];
 
 const EPS = 1e-7;
+// A build-plate layout needs a stable manufacturing outline, not the raw CAD
+// tessellation. Preserve a fine projection grid for placement accuracy, then
+// smooth the rendered contour at a print-planning scale.
+const PLATE_OUTLINE_GRID_MM = 0.2;
+const PLATE_OUTLINE_TOLERANCE_MM = 0.5;
 
 function fromPc(value: PcMultiPolygon): Footprint {
   return value.map((polygon) => polygon.map((ring) => {
@@ -74,14 +79,14 @@ export function silhouetteFromMeshes(meshes: ModelMesh[], orientation: Quaternio
   }
   if (!allTriangles.length) return [];
 
-  // CAD tessellations often contain almost-identical edges. Retry on progressively
-  // coarser sub-millimetre grids before using a guaranteed non-throwing fallback.
-  // A solid's upper-facing skin alone covers its projected footprint. Using it
-  // first eliminates the duplicate underside and side-wall projections that can
-  // overwhelm polygon clipping and trigger the old convex-hull fallback.
-  for (const source of [upwardTriangles, allTriangles]) {
+  // The projection must cover every face of the solid. Some imported STEP and
+  // STL meshes have mixed triangle winding, so using only upward-facing facets
+  // can leave isolated triangles on the plate and make only those triangles
+  // draggable. Try the complete projected shell first; the upward-facing skin
+  // remains a cheaper fallback for pathological meshes.
+  for (const source of [allTriangles, upwardTriangles]) {
     if (!source.length) continue;
-    for (const precision of [0.2, 0.5, 1]) {
+    for (const precision of [PLATE_OUTLINE_GRID_MM, 0.5, 1]) {
       try {
         const result = unionTriangles(source, precision);
         if (result.length) return result;
@@ -99,6 +104,43 @@ export function normalizeFootprint(footprint: Footprint): Footprint {
   return footprint.map((polygon) => polygon.map((ring) => ring.map((p) => ({ x: p.x - b.minX, y: p.y - b.minY }))));
 }
 
+function distanceToSegment(point: Point, start: Point, end: Point) {
+  const dx = end.x - start.x, dy = end.y - start.y;
+  const lengthSquared = dx * dx + dy * dy;
+  if (!lengthSquared) return Math.hypot(point.x - start.x, point.y - start.y);
+  const t = Math.max(0, Math.min(1, ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared));
+  return Math.hypot(point.x - (start.x + t * dx), point.y - (start.y + t * dy));
+}
+
+function simplifyOpenRing(points: Ring, tolerance: number): Ring {
+  if (points.length <= 2) return points;
+  let furthestIndex = -1, furthestDistance = tolerance;
+  for (let index = 1; index < points.length - 1; index++) {
+    const distance = distanceToSegment(points[index], points[0], points.at(-1)!);
+    if (distance > furthestDistance) { furthestDistance = distance; furthestIndex = index; }
+  }
+  if (furthestIndex < 0) return [points[0], points.at(-1)!];
+  return [...simplifyOpenRing(points.slice(0, furthestIndex + 1), tolerance).slice(0, -1), ...simplifyOpenRing(points.slice(furthestIndex), tolerance)];
+}
+
+function smoothRing(ring: Ring, tolerance: number): Ring {
+  if (tolerance <= 0 || ring.length <= 4) return ring.map((point) => ({ ...point }));
+  // First remove duplicate micro-steps, then simplify both arcs between two
+  // opposite points. Treating a ring as two open paths avoids the seam and
+  // preserves concave contours and interior holes.
+  const deNoised = ring.reduce<Ring>((kept, point) => !kept.length || Math.hypot(point.x - kept.at(-1)!.x, point.y - kept.at(-1)!.y) >= tolerance * .25 ? [...kept, point] : kept, []);
+  if (deNoised.length < 4) return ring.map((point) => ({ ...point }));
+  let split = 1, greatestDistance = -1;
+  for (let index = 1; index < deNoised.length; index++) {
+    const distance = Math.hypot(deNoised[index].x - deNoised[0].x, deNoised[index].y - deNoised[0].y);
+    if (distance > greatestDistance) { greatestDistance = distance; split = index; }
+  }
+  const firstArc = simplifyOpenRing(deNoised.slice(0, split + 1), tolerance);
+  const secondArc = simplifyOpenRing([...deNoised.slice(split), deNoised[0]], tolerance);
+  const simplified = [...firstArc.slice(0, -1), ...secondArc.slice(0, -1)];
+  return (simplified.length >= 3 ? simplified : ring).map((point) => ({ ...point }));
+}
+
 function simplifyRing(ring: Ring, tolerance: number): Ring {
   if (tolerance <= 0 || ring.length <= 4) return ring.map((point) => ({ ...point }));
   const kept: Ring = [ring[0]];
@@ -112,6 +154,25 @@ function simplifyRing(ring: Ring, tolerance: number): Ring {
 
 export function simplifyFootprint(footprint: Footprint, tolerance: number): Footprint {
   return footprint.map((polygon) => polygon.map((ring) => simplifyRing(ring, tolerance)).filter((ring) => ring.length >= 3)).filter((polygon) => polygon.length);
+}
+
+function ringArea(ring: Ring) {
+  return Math.abs(ring.reduce((sum, point, index) => {
+    const next = ring[(index + 1) % ring.length];
+    return sum + point.x * next.y - next.x * point.y;
+  }, 0)) / 2;
+}
+
+export function displayFootprint(footprint: Footprint): Footprint {
+  // Projected mesh unions can contain pinhole-sized islands and holes along
+  // tessellation seams. They are neither printable features nor useful drag
+  // targets, so the plate view deliberately omits them.
+  const minimumFeatureArea = 1;
+  return footprint.map((polygon) => {
+    const outer = smoothRing(polygon[0], PLATE_OUTLINE_TOLERANCE_MM);
+    if (ringArea(outer) < minimumFeatureArea) return [];
+    return [outer, ...polygon.slice(1).filter((ring) => ringArea(ring) >= minimumFeatureArea).map((ring) => smoothRing(ring, PLATE_OUTLINE_TOLERANCE_MM))];
+  }).filter((polygon) => polygon.length);
 }
 
 export function transformFootprint(footprint: Footprint, degrees: number, dx = 0, dy = 0): Footprint {

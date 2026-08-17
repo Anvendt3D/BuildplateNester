@@ -338,7 +338,12 @@ async function nestAttempt(request: NestRequest, attempt: number, noFit: NoFitMa
     const makeEntry = (item: Instance, raster: typeof rasterVariants[number], x: number, y: number) => {
       const worldX = edgeMargin + x * rasterResolution, worldY = edgeMargin + y * rasterResolution;
       const exactWorld = translateFootprint(raster.variant.exactFootprint, worldX, worldY), exactBounds = footprintBounds(exactWorld);
-      for (const other of placed) if (boundsMayOverlap(exactBounds, other.bounds, clearance) && footprintsOverlap(exactWorld, other.exactWorld, clearance)) return null;
+      // The raster is only a fast guide. Final acceptance remains an exact
+      // contour test, but only against parts whose expanded bounds can meet.
+      for (const index of spatial.query({ minX: exactBounds.minX - clearance, minY: exactBounds.minY - clearance, maxX: exactBounds.maxX + clearance, maxY: exactBounds.maxY + clearance })) {
+        const other = placed[index];
+        if (boundsMayOverlap(exactBounds, other.bounds, clearance) && footprintsOverlap(exactWorld, other.exactWorld, clearance)) return null;
+      }
       return { placement: { id: `${item.part.id}-${item.copy}`, partId: item.part.id, copy: item.copy, x: worldX, y: worldY, rotation: raster.variant.rotation, footprint: raster.variant.exactFootprint, colliding: false, nested: true } as Placement, searchWorld: translateFootprint(raster.variant.searchFootprint, worldX, worldY), exactWorld, bounds: exactBounds, variantKey: raster.variant.key } as InternalPlacement;
     };
     const addRasterPlacement = (entry: InternalPlacement, raster: typeof rasterVariants[number], x: number, y: number) => { markRaster(raster, x, y); insertPlacement(entry); };
@@ -360,21 +365,54 @@ async function nestAttempt(request: NestRequest, attempt: number, noFit: NoFitMa
       if (control.shouldCancel?.() || Date.now() >= deadline) return { placed: placed.map((entry) => entry.placement), unplaced: instances.slice(itemIndex).map((item) => ({ partId: item.part.id, copy: item.copy })), cancelled: true, candidateChecks: totalChecks.value };
       const item = instances[itemIndex];
       const candidates: { raster: typeof rasterVariants[number]; x: number; y: number; score: number }[] = [];
-      for (const raster of rasterVariants) for (let y = 0; y <= gridHeight - raster.heightCells; y++) {
-        for (let x = 0; x <= gridWidth - raster.widthCells; x++) {
-          totalChecks.value++;
-          if (!rasterFits(raster, x, y)) continue;
-          const candidateBounds = shiftedBounds(raster.variant.bounds, edgeMargin + x * rasterResolution, edgeMargin + y * rasterResolution);
-          const cluster = [...placed.map((entry) => entry.bounds), candidateBounds];
-          const minX = Math.min(...cluster.map((entry) => entry.minX)), minY = Math.min(...cluster.map((entry) => entry.minY));
-          const maxX = Math.max(...cluster.map((entry) => entry.maxX)), maxY = Math.max(...cluster.map((entry) => entry.maxY));
-          const startBias = nestingStart === "center" ? Math.hypot((minX + maxX) / 2 - width / 2, (minY + maxY) / 2 - depth / 2) : y * gridWidth + x;
-          const score = (maxX - minX) * (maxY - minY) * 1_000 + startBias;
-          if (candidates.length < 80 || score < candidates.at(-1)!.score) {
-            candidates.push({ raster, x, y, score }); candidates.sort((a, b) => a.score - b.score); if (candidates.length > 80) candidates.pop();
-          }
+      const addCandidate = (raster: typeof rasterVariants[number], x: number, y: number) => {
+        if (!rasterFits(raster, x, y)) return;
+        totalChecks.value++;
+        const candidateBounds = shiftedBounds(raster.variant.bounds, edgeMargin + x * rasterResolution, edgeMargin + y * rasterResolution);
+        const cluster = clusterBounds ?? candidateBounds;
+        const minX = Math.min(cluster.minX, candidateBounds.minX), minY = Math.min(cluster.minY, candidateBounds.minY);
+        const maxX = Math.max(cluster.maxX, candidateBounds.maxX), maxY = Math.max(cluster.maxY, candidateBounds.maxY);
+        const startBias = nestingStart === "center" ? Math.hypot((minX + maxX) / 2 - width / 2, (minY + maxY) / 2 - depth / 2) : y * gridWidth + x;
+        const score = (maxX - minX) * (maxY - minY) * 1_000 + startBias;
+        if (candidates.length < 80 || score < candidates.at(-1)!.score) {
+          candidates.push({ raster, x, y, score }); candidates.sort((a, b) => a.score - b.score); if (candidates.length > 80) candidates.pop();
         }
-        if (totalChecks.value % 20_000 < gridWidth) { await new Promise<void>((resolve) => setTimeout(resolve, 0)); if (control.shouldCancel?.() || Date.now() >= deadline) break; }
+      };
+      const frontierPositions = (raster: typeof rasterVariants[number]) => {
+        const positions = new Set<string>();
+        const add = (x: number, y: number) => {
+          if (x < 0 || y < 0 || x + raster.widthCells > gridWidth || y + raster.heightCells > gridHeight) return;
+          positions.add(`${x},${y}`);
+        };
+        add(0, 0); add(gridWidth - raster.widthCells, 0); add(0, gridHeight - raster.heightCells);
+        // Test the four sides and aligned corners of each existing item. This
+        // follows the growing packing frontier rather than rescanning the
+        // whole plate for every added instance.
+        for (const entry of placed) {
+          const minX = Math.round((entry.bounds.minX - edgeMargin) / rasterResolution), minY = Math.round((entry.bounds.minY - edgeMargin) / rasterResolution);
+          const maxX = Math.round((entry.bounds.maxX - edgeMargin) / rasterResolution), maxY = Math.round((entry.bounds.maxY - edgeMargin) / rasterResolution);
+          for (const x of [minX, maxX - raster.widthCells, minX - raster.widthCells, maxX]) for (const y of [minY, maxY - raster.heightCells, minY - raster.heightCells, maxY]) add(x, y);
+          add(maxX, minY); add(minX - raster.widthCells, minY); add(minX, maxY); add(minX, minY - raster.heightCells);
+        }
+        return positions;
+      };
+      if (request.preset === "quick") {
+        // Quick is deliberately responsive: follow the exposed packing
+        // frontier and accept that it may miss a deeper concave interlock.
+        for (const raster of rasterVariants) for (const position of frontierPositions(raster)) {
+          const [x, y] = position.split(",").map(Number); addCandidate(raster, x, y);
+        }
+      } else {
+        // Balanced and Best Fit must examine every raster pose. Restricting
+        // these modes to frontier contacts made crescents and hook-shaped
+        // parts stop at an apparently tidy but low-utilization arrangement.
+        for (const raster of rasterVariants) for (let y = 0; y <= gridHeight - raster.heightCells; y++) {
+          for (let x = 0; x <= gridWidth - raster.widthCells; x++) {
+            totalChecks.value++;
+            if (rasterFits(raster, x, y)) addCandidate(raster, x, y);
+          }
+          if (totalChecks.value % 20_000 < gridWidth) { await new Promise<void>((resolve) => setTimeout(resolve, 0)); if (control.shouldCancel?.() || Date.now() >= deadline) break; }
+        }
       }
       let accepted = false;
       for (const candidate of candidates) {

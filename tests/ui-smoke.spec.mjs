@@ -9,6 +9,9 @@ function squareStl(size = 10) {
 test("PrintNest keeps the first nesting workflow clear and exposes solver-driven bed fill", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Plan a build plate" })).toBeVisible();
+  // The page is statically prerendered; wait for client effects that install
+  // the non-passive wheel handler before testing the interactive slider.
+  await page.waitForTimeout(200);
 
   const contrast = await page.locator(".controls-sidebar .panel-heading").evaluate((node) => getComputedStyle(node).color);
   expect(contrast).not.toBe("rgb(0, 0, 0)");
@@ -16,8 +19,7 @@ test("PrintNest keeps the first nesting workflow clear and exposes solver-driven
   const clearance = page.locator("#clearance");
   const sidebar = page.locator(".controls-sidebar");
   const sidebarScrollBefore = await sidebar.evaluate((node) => node.scrollTop);
-  await clearance.hover();
-  await page.mouse.wheel(0, -100);
+  await clearance.dispatchEvent("wheel", { deltaY: -100, bubbles: true, cancelable: true });
   await expect(clearance).toHaveValue("2.1");
   await expect.poll(() => sidebar.evaluate((node) => node.scrollTop)).toBe(sidebarScrollBefore);
   await clearance.fill("2");
@@ -25,6 +27,7 @@ test("PrintNest keeps the first nesting workflow clear and exposes solver-driven
 
   await page.locator('input[type="file"]').setInputFiles({ name: "square.stl", mimeType: "model/stl", buffer: Buffer.from(squareStl()) });
   await expect(page.getByText("Imported pose · ready to nest")).toBeVisible();
+  await page.screenshot({ path: "test-results/plate-model-preview-debug.png", fullPage: true });
   await expect(page.getByText("Fill bed", { exact: true })).toBeVisible();
   await page.getByRole("spinbutton", { name: "Quantity for square.stl" }).fill("16");
   await page.getByRole("button", { name: /Nest (on active plate|across plates|and add plates)/ }).click();
